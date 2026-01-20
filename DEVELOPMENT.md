@@ -25,13 +25,22 @@ and reproducibility.
    - Important user instructions or preferences
 
 4. **Preserve user preferences** - Document important user instructions and preferences in this file so
-   they can be referenced in future AI chat sessions when history is unavailable.
+   they can be referenced in future AI chat sessions when history is unavailable. **This is critical for
+   new AI agents that don't have historical knowledge** - they must be able to understand all important
+   rules and conventions by reading this file.
 
 5. **No historical name references** - Do not keep references to old names (files, methods, variables,
    etc.) in documentation. Update all references to current names immediately. Only mention old names in
    examples showing what NOT to do (e.g., bad naming examples).
 
+6. **Git commit at stable milestones** - When development reaches a stable milestone (completed feature,
+   fixed issues, significant improvements), create a git commit with a descriptive message and push to the
+   remote repository. This ensures progress is saved and the repository stays up to date.
+
 ### Important User Instructions
+
+**CRITICAL**: These instructions must be followed by all AI agents, especially new ones without
+historical context. All important rules and preferences must be documented here.
 
 - **Docker-first approach**: Always use Docker containers instead of local Python installation. The user
   prefers `docker compose` (v2 syntax) over `docker-compose`.
@@ -43,6 +52,11 @@ and reproducibility.
 - **No historical name references**: Do not keep references to old names (files, methods, variables,
   etc.) in documentation. Update all references to current names immediately. Only mention old names in
   examples showing what NOT to do.
+- **Git commit at stable milestones**: When development reaches a stable milestone (completed feature,
+  fixed issues, significant improvements), create a git commit with a descriptive message and push to
+  the remote repository. Ensure all relevant changes are committed, not just the most recent ones.
+- **Document important rules**: Any important rules, preferences, or conventions mentioned during
+  development should be added to this section so future AI agents can discover them.
 - **Conflict resolution**: If there's a conflict between user instructions and DEVELOPMENT.md, ask the
   user to validate before proceeding.
 
