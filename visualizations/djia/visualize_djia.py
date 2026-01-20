@@ -27,6 +27,9 @@ Examples:
   # Daily close prices for 2023
   python visualize_djia.py --start-date 2023-01-01 --end-date 2023-12-31 --granularity daily --column Close
 
+  # Daily prices with Elliott Wave detection
+  python visualize_djia.py --granularity daily --column Close --elliott-waves
+
   # Monthly average prices for all time
   python visualize_djia.py --granularity monthly --aggregation mean --column Close
 
@@ -66,6 +69,7 @@ Examples:
     parser.add_argument(
         '--column',
         type=str,
+        default='Close',
         help='Column to visualize (default: Close). Available: Close, High, Low, Open, Volume'
     )
     
@@ -85,6 +89,32 @@ Examples:
         '--title',
         type=str,
         help='Chart title (auto-generated if not specified)'
+    )
+    
+    parser.add_argument(
+        '--elliott-waves',
+        action='store_true',
+        help='Enable Elliott Wave detection and color coding'
+    )
+    
+    parser.add_argument(
+        '--min-confidence',
+        type=float,
+        default=0.6,
+        help='Minimum confidence (0.0-1.0) for wave detection (default: 0.6)'
+    )
+    
+    parser.add_argument(
+        '--min-wave-size',
+        type=float,
+        default=0.05,
+        help='Minimum wave size as ratio of price range (default: 0.05 = 5%%)'
+    )
+    
+    parser.add_argument(
+        '--only-complete-patterns',
+        action='store_true',
+        help='Only show complete 5-wave or 3-wave patterns'
     )
     
     return parser.parse_args()
@@ -113,7 +143,7 @@ def main():
         processor = DataProcessor(df)
         
         # Determine column
-        column = args.column or 'Close'
+        column = args.column
         if column not in processor.get_available_columns():
             print(f"Error: Column '{column}' not found.")
             print(f"Available columns: {', '.join(processor.get_available_columns())}")
@@ -165,13 +195,32 @@ def main():
         # Create visualization
         print("Generating visualization...")
         visualizer = Visualizer(output_dir=args.output_dir)
-        output_path = visualizer.plot_line(
-            data,
-            title=title,
-            xlabel="Date",
-            ylabel=f"{column} ({aggregation.value if args.granularity != 'daily' else ''})".strip(),
-            output_filename=args.output_filename
-        )
+        
+        if args.elliott_waves:
+            # Use Elliott Wave visualization
+            if args.granularity != 'daily':
+                print("Warning: Elliott Wave detection works best with daily data. "
+                      "Consider using --granularity daily for better results.")
+            output_path = visualizer.plot_line_with_elliott_waves(
+                data,
+                title=title + " (with Elliott Waves)",
+                xlabel="Date",
+                ylabel=f"{column} ({aggregation.value if args.granularity != 'daily' else ''})".strip(),
+                output_filename=args.output_filename,
+                show_waves=True,
+                min_confidence=args.min_confidence,
+                min_wave_size_ratio=args.min_wave_size,
+                only_complete_patterns=args.only_complete_patterns
+            )
+        else:
+            # Use standard line chart
+            output_path = visualizer.plot_line(
+                data,
+                title=title,
+                xlabel="Date",
+                ylabel=f"{column} ({aggregation.value if args.granularity != 'daily' else ''})".strip(),
+                output_filename=args.output_filename
+            )
         
         print(f"Chart saved to: {output_path}")
         return 0

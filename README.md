@@ -1,20 +1,27 @@
-# Python Trading Project
+# Trading Analysis Project
 
-A Python project that downloads and displays DJIA (Dow Jones Industrial Average) data using yfinance.
+A comprehensive Python project for analyzing DJIA (Dow Jones Industrial Average) trading data
+using Elliott Wave Theory, signal detection, and trade evaluation.
+
+## Overview
+
+This project provides a complete toolkit for:
+
+- **Data Collection**: Downloading and caching historical DJIA data
+- **Elliott Wave Analysis**: Detecting wave patterns in price movements
+- **Trading Signals**: Identifying buy/sell opportunities with target prices and stop-loss levels
+- **Trade Evaluation**: Backtesting signals to calculate performance metrics
+- **Visualization**: Generating charts and graphs for analysis
 
 ## Quick Start
 
-The easiest way to run the project is using the Makefile:
-
-```bash
-make up
-```
-
-Or see all available commands:
+See all available commands:
 
 ```bash
 make help
 ```
+
+For detailed examples and best practices, see [EXAMPLES.md](EXAMPLES.md).
 
 ## Running with Docker
 

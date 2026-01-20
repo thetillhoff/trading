@@ -29,6 +29,9 @@ Thumbs.db
 *.csv
 !requirements.txt
 
+# Generated images
+*.png
+
 # Node.js
 node_modules/
 package-lock.json

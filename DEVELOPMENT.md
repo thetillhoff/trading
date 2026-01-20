@@ -34,8 +34,9 @@ and reproducibility.
    examples showing what NOT to do (e.g., bad naming examples).
 
 6. **Git commit at stable milestones** - When development reaches a stable milestone (completed feature,
-   fixed issues, significant improvements), create a git commit with a descriptive message and push to the
-   remote repository. This ensures progress is saved and the repository stays up to date.
+   fixed issues, significant improvements), **persist the milestone via git commit** with a descriptive
+   message and push to the remote repository. This ensures progress is saved and the repository stays up
+   to date. Stable milestones should be committed immediately, not deferred.
 
 ### Important User Instructions
 
@@ -53,10 +54,33 @@ historical context. All important rules and preferences must be documented here.
   etc.) in documentation. Update all references to current names immediately. Only mention old names in
   examples showing what NOT to do.
 - **Git commit at stable milestones**: When development reaches a stable milestone (completed feature,
-  fixed issues, significant improvements), create a git commit with a descriptive message and push to
-  the remote repository. Ensure all relevant changes are committed, not just the most recent ones.
+  fixed issues, significant improvements), **persist the milestone via git commit** with a descriptive
+  message and push to the remote repository. Ensure all relevant changes are committed, not just the
+  most recent ones. Stable milestones should be committed immediately to preserve progress.
+- **Keep documentation up to date**: Keep usage instructions in README files and Makefiles up to date
+  when making changes. If you add new features, update the relevant README with examples. If you add
+  new commands, update the Makefile and its help text.
+- **Follow software engineering best practices**: Apply good software engineering practices throughout
+  development. For example:
+  - If a file becomes too long (e.g., >500 lines), consider splitting it into smaller modules
+  - Extract complex methods into separate functions or classes when they become unwieldy
+  - Maintain clear separation of concerns between modules
+  - Keep functions focused on a single responsibility
+  - Refactor code when it becomes difficult to understand or maintain
+- **Restructure when necessary**: Restructuring of files, folders, and code can happen whenever necessary
+  and useful. Don't hesitate to reorganize the codebase to improve maintainability, clarity, or
+  structure. This includes:
+  - Moving files to more appropriate locations
+  - Splitting large modules into smaller, focused modules
+  - Reorganizing directory structures
+  - Refactoring code to better align with project patterns
+  - Updating imports and references after restructuring
 - **Document important rules**: Any important rules, preferences, or conventions mentioned during
   development should be added to this section so future AI agents can discover them.
+- **Standardize CLI arguments**: All visualization and analysis scripts should use consistent argument
+  names, formats, defaults, and help text. Common arguments like `--start-date`, `--end-date`,
+  `--column`, `--min-confidence`, and `--min-wave-size` must work the same way across all scripts.
+  This ensures users can apply the same parameters across different tools without confusion.
 - **Conflict resolution**: If there's a conflict between user instructions and DEVELOPMENT.md, ask the
   user to validate before proceeding.
 
@@ -326,6 +350,32 @@ trading/
 - Discoverability: `make help` in each app directory shows available commands
 - Manual usage: supports scenarios where users need to run apps manually
 
+### 12. Standardized CLI Arguments
+
+**Decision**: All visualization and analysis scripts use consistent argument names, formats, defaults,
+and help text
+
+**Rationale**:
+
+- User experience: users can apply the same parameters across different tools without confusion
+- Consistency: reduces cognitive load when switching between scripts
+- Predictability: arguments behave the same way everywhere
+- Maintainability: easier to document and support when arguments are standardized
+
+**Standard Arguments**:
+
+- `--start-date`: Start date (inclusive) in format YYYY-MM-DD (optional)
+- `--end-date`: End date (inclusive) in format YYYY-MM-DD (optional)
+- `--column`: Column to analyze/visualize (default: Close). Available: Close, High, Low, Open, Volume
+- `--min-confidence`: Minimum confidence (0.0-1.0) for wave detection (default: 0.6)
+- `--min-wave-size`: Minimum wave size as ratio of price range (default: 0.05 = 5%)
+- `--granularity`: Time granularity (where applicable): daily, weekly, monthly, yearly (default: daily)
+- `--aggregation`: Aggregation method (where applicable): mean, max, min, median, sum, first, last
+  (default: mean)
+
+**Implementation**: All scripts that accept these arguments must use the exact same parameter names,
+formats, defaults, and help text. When adding new scripts, follow this standard.
+
 ## Current State
 
 The project is functional and ready for use. It:
@@ -339,7 +389,14 @@ The project is functional and ready for use. It:
   - Granularity selection (daily, weekly, monthly, yearly)
   - Aggregation methods (mean, max, min, median, sum, first, last)
   - Column selection (Close, High, Low, Open, Volume)
-- ✅ Includes comprehensive documentation
+- ✅ Elliott Wave pattern detection with color-coded visualization
+- ✅ Trading signal detection (buy/sell) with target prices and stop-loss calculation
+- ✅ Trade evaluation and backtesting with performance metrics
+- ✅ Filter optimization for Elliott Wave detection
+- ✅ Multi-chart generation (combined or separate visualizations)
+- ✅ Buy-and-hold comparison for trade evaluation
+- ✅ Hold-through-stop-loss strategy testing
+- ✅ Includes comprehensive documentation (EXAMPLES.md, module READMEs)
 
 ## Future Considerations
 
@@ -361,10 +418,21 @@ Potential enhancements:
 - **yfinance** (>=0.2.0): Yahoo Finance data downloader
 - **pandas** (>=2.0.0): Data manipulation and CSV handling
 
-### Visualization Dependencies (visualizations/djia/requirements.txt)
+### Visualization Dependencies
 
-- **pandas** (>=2.0.0): Data manipulation and CSV handling
-- **matplotlib** (>=3.7.0): Chart and graph generation
+- **visualizations/djia/requirements.txt**:
+  - pandas (>=2.0.0): Data manipulation and CSV handling
+  - matplotlib (>=3.7.0): Chart and graph generation
+- **visualizations/elliott_wave_optimizer/requirements.txt**:
+  - pandas (>=2.0.0): Data manipulation
+  - numpy (>=1.24.0): Numerical computations
+- **visualizations/trading_signals/requirements.txt**:
+  - pandas (>=2.0.0): Data manipulation
+  - matplotlib (>=3.7.0): Chart generation
+- **visualizations/trade_evaluator/requirements.txt**:
+  - pandas (>=2.0.0): Data manipulation
+  - numpy (>=1.24.0): Numerical computations
+  - matplotlib (>=3.7.0): Chart generation
 
 ## Usage Summary
 
