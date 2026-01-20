@@ -1,0 +1,12 @@
+{
+  "name": "trading",
+  "version": "1.0.0",
+  "description": "Trading data project - markdown linting",
+  "scripts": {
+    "lint:md": "markdownlint '**/*.md' --ignore node_modules",
+    "lint:md:fix": "markdownlint '**/*.md' --ignore node_modules --fix"
+  },
+  "devDependencies": {
+    "markdownlint-cli": "^0.42.0"
+  }
+}
