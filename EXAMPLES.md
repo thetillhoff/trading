@@ -29,7 +29,6 @@ make evaluate-trades ARGS="--start-date 2015-01-01 --end-date 2024-12-31 --colum
 
 ### Other Useful Variations
 
-
 **Stricter filtering (fewer, higher-quality signals)**:
 
 ```bash
@@ -66,7 +65,9 @@ make evaluate-trades ARGS="--start-date 2015-01-01 --end-date 2024-12-31 --colum
 make evaluate-trades ARGS="--start-date 2015-01-01 --end-date 2024-12-31 --column Close --require-both-targets"
 ```
 
-This simulates what happens if you don't sell when stop-loss is hit, but instead hold until the price recovers (returns to entry level or better). Useful for comparing strict stop-loss execution vs. holding strategies.
+This simulates what happens if you don't sell when stop-loss is hit, but instead hold until
+the price recovers (returns to entry level or better). Useful for comparing strict stop-loss
+execution vs. holding strategies.
 
 ## Multi-Chart Generation
 

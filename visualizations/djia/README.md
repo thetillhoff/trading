@@ -218,6 +218,7 @@ that reflect investor psychology.
 ### Wave Structure
 
 **Impulse Waves (1-5)**: These move in the direction of the main trend:
+
 - **Wave 1**: Initial move in the trend direction
 - **Wave 2**: Correction/retracement (typically 38.2% to 61.8% of Wave 1)
 - **Wave 3**: Strongest wave, often the longest (cannot be shortest of 1, 3, 5)
@@ -225,6 +226,7 @@ that reflect investor psychology.
 - **Wave 5**: Final move in trend direction (often weaker than Wave 3)
 
 **Corrective Waves (a, b, c)**: These move against the main trend:
+
 - **Wave A**: First correction against the trend
 - **Wave B**: Partial retracement of Wave A
 - **Wave C**: Final correction, often extends beyond Wave A
@@ -265,14 +267,17 @@ When you see a 3-wave corrective pattern:
 ### Forecasting Guidelines
 
 **Uptrend Pattern (5 waves up)**:
+
 - After Wave 5 completes → Expect downward correction (a-b-c)
 - After correction completes → Potential for new uptrend or continuation
 
 **Downtrend Pattern (5 waves down)**:
+
 - After Wave 5 completes → Expect upward correction (a-b-c)
 - After correction completes → Potential for new downtrend or reversal
 
 **Key Rules**:
+
 - Wave 2 cannot retrace more than 100% of Wave 1
 - Wave 3 cannot be the shortest of waves 1, 3, and 5
 - Wave 4 cannot overlap with Wave 1 (except in diagonal triangles)
@@ -281,12 +286,14 @@ When you see a 3-wave corrective pattern:
 ### Limitations
 
 **Important**: Elliott Wave analysis is:
+
 - **Subjective**: Different analysts may identify different wave counts
 - **Probabilistic**: Patterns suggest probabilities, not certainties
 - **Context-dependent**: Works best with sufficient historical data
 - **Not a guarantee**: Past patterns don't guarantee future results
 
 Use Elliott Wave analysis as **one tool** in your trading toolkit, combined with:
+
 - Fundamental analysis
 - Other technical indicators
 - Risk management

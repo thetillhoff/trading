@@ -28,8 +28,10 @@ This tool evaluates the performance of trading signals generated from Elliott Wa
 ### Buy Signals (Betting on Price Going Up)
 
 1. **Entry**: Signal generated at end of Wave 2 or Wave 4 (correction in uptrend)
-2. **Target**: Fibonacci extension level (typically 1.618x the correction size) - price going UP
-3. **Stop-Loss**: Based on risk/reward ratio (e.g., if target is +10%, stop-loss might be -5% for 2:1 ratio) - price going DOWN
+2. **Target**: Fibonacci extension level (typically 1.618x the correction size) - price
+   going UP
+3. **Stop-Loss**: Based on risk/reward ratio (e.g., if target is +10%, stop-loss might be
+   -5% for 2:1 ratio) - price going DOWN
 4. **Evaluation**: Check if price reached target (win) or stop-loss (loss) first
 5. **Win**: Price went up and hit target → "Buy Win"
 6. **Loss**: Price went down and hit stop-loss → "Buy Loss"
@@ -126,7 +128,9 @@ python evaluate_trades.py [ARGS]
 
 - `--max-days INT`: Maximum days to hold a trade (default: until target/stop-loss or data ends)
 - `--require-both-targets`: Only evaluate signals with both target and stop-loss (default: evaluate all signals)
-- `--hold-through-stop-loss`: When stop-loss is hit, continue holding until recovery (price returns to entry level or better). Useful for testing "hold and wait" strategies vs. strict stop-loss execution.
+- `--hold-through-stop-loss`: When stop-loss is hit, continue holding until recovery
+  (price returns to entry level or better). Useful for testing "hold and wait" strategies
+  vs. strict stop-loss execution.
 
 ### Output
 
@@ -167,7 +171,9 @@ Evaluates trades with a 30-day maximum holding period.
 make run ARGS="--column Close --hold-through-stop-loss"
 ```
 
-Simulates what happens if you don't exit when stop-loss is hit, but instead hold until price recovers (returns to entry level or better). Useful for comparing strict stop-loss execution vs. holding strategies.
+Simulates what happens if you don't exit when stop-loss is hit, but instead hold until
+price recovers (returns to entry level or better). Useful for comparing strict stop-loss
+execution vs. holding strategies.
 
 ## Visualization
 
@@ -178,14 +184,15 @@ The trade evaluator automatically generates a visual chart showing:
   - Green triangles: Winning trades (target hit)
   - Red triangles: Losing trades (stop-loss hit)
   - Orange triangles: No outcome (neither target nor stop-loss hit)
-- **Exit points**: 
+- **Exit points**:
   - Green circles: Target price reached
   - Red X markers: Stop-loss hit
 - **Connection lines**: Dashed lines connecting entry to exit points (shown in legend as "Entry to Exit Connection")
 - **Annotations**: Percentage gain/loss shown near each exit point
 - **Summary box**: Statistics displayed at the bottom of the chart (includes buy-and-hold comparison)
 
-The chart uses the same format and style as the Elliott Wave and Trading Signals visualizations, making it easy to compare all three side-by-side.
+The chart uses the same format and style as the Elliott Wave and Trading Signals
+visualizations, making it easy to compare all three side-by-side.
 
 ## Output Interpretation
 
@@ -219,6 +226,7 @@ For each trade, you'll see:
 
 A win rate above 50% with a good risk/reward ratio (e.g., 2:1) indicates profitable strategy.
 However, consider:
+
 - Sample size (more trades = more reliable)
 - Market conditions during the period
 - Whether results are consistent across different time periods
@@ -226,6 +234,7 @@ However, consider:
 ### Average Gain vs Loss
 
 For a 2:1 risk/reward ratio:
+
 - If you win 40% of trades, you break even
 - If you win 50% of trades, you're profitable
 - Average gain should be roughly 2x the average loss
@@ -238,6 +247,7 @@ For a 2:1 risk/reward ratio:
 ### Buy-and-Hold Comparison
 
 The evaluator automatically compares your trading strategy's performance against a simple buy-and-hold strategy:
+
 - **Buy-and-Hold Gain**: What you would have made if you bought at the start of the period and held until the end
 - **Outperformance**: The difference between your strategy's total gain and buy-and-hold gain
 - Positive outperformance means your trading strategy beat buy-and-hold
@@ -253,6 +263,7 @@ The evaluator automatically compares your trading strategy's performance against
 ## Future Enhancements
 
 Potential improvements:
+
 - Portfolio-level analysis (multiple trades simultaneously)
 - Risk-adjusted returns (Sharpe ratio, etc.)
 - Drawdown analysis

@@ -6,6 +6,7 @@ across different time granularities (yearly, quarterly, monthly, weekly, daily).
 ## Overview
 
 This tool analyzes your trading data to recommend optimal values for:
+
 - `--min-confidence`: Minimum confidence threshold for wave detection
 - `--min-wave-size`: Minimum wave size as ratio of price range
 - `--only-complete-patterns`: Whether to only show complete patterns

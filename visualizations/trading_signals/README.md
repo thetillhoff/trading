@@ -6,6 +6,7 @@ target prices and stop-loss levels for trading decisions.
 ## Overview
 
 This tool detects trading opportunities based on Elliott Wave Theory:
+
 - **Buy Signals**: End of wave 2 or wave 4 (corrections in uptrend)
 - **Sell Signals**: End of wave 5 (completion of impulse) or wave B (counter-trend)
 - **Target Prices**: Calculated using Fibonacci extensions/retracements
@@ -123,7 +124,7 @@ make run ARGS="--column Close --min-confidence 0.7 --min-wave-size 0.08"
 make run ARGS="--column Close --risk-reward 3.0"
 ```
 
-## Output
+## Analyzer Output
 
 The analyzer provides:
 
@@ -155,9 +156,10 @@ The analyzer provides:
 - **End of Wave 5**: Completion of impulse wave, potential exit
 - **End of Wave B (up)**: Corrective wave up in downtrend
 
-## Target Calculation
+## How Targets Are Calculated
 
 Targets are calculated using:
+
 - **Fibonacci extensions** (for buy targets): 1.618x the correction size
 - **Fibonacci retracements** (for sell targets): 50% of the impulse size
 - **Stop-loss**: Based on risk/reward ratio (default 2:1)
@@ -165,6 +167,7 @@ Targets are calculated using:
 ## Integration with Other Tools
 
 This tool works well with:
+
 - **Elliott Wave Optimizer**: Use optimized filter values for better signal detection
 - **Visualization**: Signals can be overlaid on existing charts
 
