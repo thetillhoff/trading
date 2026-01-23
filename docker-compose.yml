@@ -1,0 +1,11 @@
+services:
+  cli:
+    build: .
+    volumes:
+      # Mount the entire project for access to all modules
+      - .:/app:rw
+      # Data directory (read-write for downloads)
+      - ./data:/app/data:rw
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app

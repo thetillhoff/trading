@@ -1,3 +1,0 @@
-"""
-DJIA scraper module.
-"""
