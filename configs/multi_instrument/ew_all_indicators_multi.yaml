@@ -1,0 +1,50 @@
+name: ew_all_indicators_multi
+description: ew_all_indicators on multiple instruments (S&P 500, DAX, Gold) - Unified portfolio testing
+
+indicators:
+  elliott_wave:
+    enabled: true
+    min_confidence: 0.65
+    min_wave_size: 0.02
+  rsi:
+    enabled: true
+    period: 7
+    oversold: 25
+    overbought: 75
+  ema:
+    enabled: true
+    short_period: 20
+    long_period: 50
+  macd:
+    enabled: true
+    fast: 12
+    slow: 26
+    signal: 12
+
+risk:
+  risk_reward: 2.5
+  position_size_pct: 0.2
+  max_positions:
+  use_confidence_sizing: true
+  confidence_size_multiplier: 0.15
+
+signals:
+  signal_types: all
+  require_all_indicators: false
+  use_trend_filter: false
+
+regime:
+  use_regime_detection: false
+  invert_signals_in_bull: true
+
+evaluation:
+  step_days: 1
+  lookback_days: 365
+
+data:
+  instruments:
+    - sp500
+    - dax
+    - gold
+  start_date: "2018-01-01"
+  end_date: "2020-01-01"

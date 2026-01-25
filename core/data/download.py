@@ -3,10 +3,14 @@
 
 import os
 import argparse
+import warnings
 import pandas as pd
 import yfinance as yf
 from typing import Dict, Optional
 from pathlib import Path
+
+# Suppress yfinance's pandas deprecation warnings (will be fixed in future yfinance version)
+warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
 
 # Get the directory where this module is located
 MODULE_DIR = Path(__file__).parent
@@ -14,17 +18,36 @@ DATA_DIR = MODULE_DIR.parent.parent / "data"  # Store data in project root /data
 
 # Instrument definitions: name -> (yahoo_ticker, description)
 INSTRUMENTS: Dict[str, tuple] = {
-    # Market Benchmark
-    "msci_world": ("URTH", "iShares MSCI World ETF - Global market benchmark"),
-
-    # Major Indices
+    # Major Indices - ETFs
     "sp500": ("^GSPC", "S&P 500 Index - US large cap"),
+    "nasdaq": ("QQQ", "Invesco QQQ Trust - NASDAQ-100 ETF"),
     "dax": ("^GDAXI", "DAX 40 Index - German blue chips"),
     "djia": ("^DJI", "Dow Jones Industrial Average - US blue chips"),
-
-    # Commodities
-    "gold": ("GC=F", "Gold Futures - Safe haven asset"),
-
+    "emerging_markets": ("EEM", "iShares MSCI Emerging Markets ETF"),
+    "small_cap": ("IWM", "iShares Russell 2000 ETF - US small cap"),
+    "msci_world": ("URTH", "iShares MSCI World ETF - Global market benchmark"),
+    
+    # Technology Stocks
+    "tech_sector": ("XLK", "Technology Select Sector SPDR ETF"),
+    "apple": ("AAPL", "Apple Inc."),
+    "microsoft": ("MSFT", "Microsoft Corporation"),
+    "amazon": ("AMZN", "Amazon.com Inc."),
+    "netflix": ("NFLX", "Netflix Inc."),
+    
+    # Clean Energy & Renewables
+    "clean_energy": ("ICLN", "iShares Global Clean Energy ETF"),
+    "solar_energy": ("TAN", "Invesco Solar ETF"),
+    "clean_tech": ("QCLN", "First Trust NASDAQ Clean Edge Green Energy ETF"),
+    "tesla": ("TSLA", "Tesla Inc. - Electric Vehicles"),
+    "nextera": ("NEE", "NextEra Energy - Renewable Utilities"),
+    
+    # ESG
+    "esg_us": ("ESGV", "Vanguard ESG U.S. Stock ETF"),
+    
+    # Precious Metals (Physical-Backed)
+    "gold_physical": ("GLD", "SPDR Gold Shares - Physically backed"),
+    "silver_physical": ("SLV", "iShares Silver Trust - Physically backed"),
+    
     # Currencies
     "eurusd": ("EURUSD=X", "EUR/USD Exchange Rate"),
 }

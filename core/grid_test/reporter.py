@@ -29,6 +29,48 @@ class ComparisonReporter:
         self.output_dir = Path(output_dir) if output_dir else Path.cwd()
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
+    def _get_result_path(
+        self,
+        config: StrategyConfig,
+        filename: str
+    ) -> Path:
+        """
+        Generate hierarchical result path matching configs/ directory structure.
+        
+        Format: results/{relative_path_from_configs}/{filename}
+        Example: configs/optimization/ew_all_indicators_wave_001.yaml 
+                 → results/optimization/ew_all_indicators_wave_001/backtest_results.csv
+        
+        Args:
+            config: Strategy configuration
+            filename: Name of the file to save
+            
+        Returns:
+            Full path for the result file
+        """
+        # Use stored source path if available (from config file location)
+        if hasattr(config, '_source_path') and config._source_path:
+            result_dir = self.output_dir / config._source_path
+        else:
+            # Fallback to old structure: config_name/instrument/date_range
+            instrument_label = "unknown"
+            if hasattr(config, 'instruments') and config.instruments:
+                if len(config.instruments) == 1:
+                    instrument_label = config.instruments[0]
+                else:
+                    instrument_label = "unified"
+            
+            date_range = "full"
+            if hasattr(config, 'start_date') and hasattr(config, 'end_date') and config.start_date and config.end_date:
+                start = config.start_date[:4]
+                end = config.end_date[:4]
+                date_range = f"{start}-{end}"
+            
+            result_dir = self.output_dir / config.name / instrument_label / date_range
+        
+        result_dir.mkdir(parents=True, exist_ok=True)
+        return result_dir / filename
+    
     def _format_config_metadata(self, config: StrategyConfig) -> List[str]:
         """
         Format strategy configuration as CSV comment lines.
@@ -1660,6 +1702,326 @@ class ComparisonReporter:
         print("\n" + "=" * 80)
         print("★ = Best value for that metric")
         print("=" * 80 + "\n")
+    
+    def generate_multi_strategy_equity_curve(
+        self,
+        results: List[WalkForwardResult],
+        filename_prefix: Optional[str] = None,
+        top_n: int = 10,
+    ) -> str:
+        """
+        Generate multi-strategy equity curve comparing strategies over time vs 2%pa benchmark.
+        
+        Shows cumulative returns for top strategies, 2%pa benchmark, and buy-and-hold.
+        
+        Args:
+            results: List of walk-forward results
+            filename_prefix: Prefix for output filename
+            top_n: Maximum number of strategies to show (default: 10)
+            
+        Returns:
+            Path to the generated chart
+        """
+        if not results:
+            return ""
+        
+        # Sort by alpha and take top N
+        sorted_results = sorted(results, key=lambda r: getattr(r, 'active_alpha', r.outperformance), reverse=True)
+        display_results = sorted_results[:top_n] if len(sorted_results) > top_n else sorted_results
+        
+        # Get date range from first result
+        first_result = results[0]
+        start_date = first_result.evaluation_start_date
+        end_date = first_result.evaluation_end_date
+        
+        # Create date index
+        date_index = pd.date_range(start=start_date, end=end_date, freq='D')
+        
+        # Calculate 2%pa benchmark (monthly compounding)
+        initial_capital = first_result.simulation.initial_capital
+        monthly_rate = 0.02 / 12
+        cash_returns = []
+        cash_balance = initial_capital
+        prev_date = date_index[0]
+        
+        for date in date_index:
+            months_elapsed = (date - prev_date).days / 30.44
+            if months_elapsed > 0:
+                for _ in range(int(months_elapsed)):
+                    cash_balance *= (1 + monthly_rate)
+                partial = months_elapsed - int(months_elapsed)
+                if partial > 0:
+                    cash_balance *= (1 + monthly_rate * partial)
+            cash_returns.append(((cash_balance - initial_capital) / initial_capital) * 100)
+            prev_date = date
+        
+        # Calculate buy-and-hold returns from actual price data over time
+        # We need to load price data to calculate the actual buy-and-hold curve
+        # Use the first result's config to get instrument and load data
+        try:
+            from core.data.loader import DataLoader
+            config = first_result.config
+            instrument = config.instruments[0] if config.instruments else "djia"
+            
+            loader = DataLoader.from_scraper(instrument)
+            df = loader.load(
+                start_date=start_date.strftime('%Y-%m-%d'),
+                end_date=end_date.strftime('%Y-%m-%d'),
+            )
+            price_data = df[config.column] if config.column in df.columns else df.iloc[:, 0]
+            
+            # Filter to evaluation period
+            price_data = price_data[(price_data.index >= start_date) & (price_data.index <= end_date)]
+            
+            # Calculate buy-and-hold returns day by day
+            initial_price = price_data.iloc[0]
+            initial_capital = first_result.simulation.initial_capital
+            bh_shares = initial_capital / initial_price
+            
+            # Create buy-and-hold returns aligned with date_index
+            bh_returns = []
+            for date in date_index:
+                # Find closest price data point
+                if date in price_data.index:
+                    current_price = price_data.loc[date]
+                else:
+                    # Use forward fill to get latest available price
+                    available_prices = price_data[price_data.index <= date]
+                    if len(available_prices) > 0:
+                        current_price = available_prices.iloc[-1]
+                    else:
+                        current_price = initial_price
+                
+                current_value = bh_shares * current_price
+                return_pct = ((current_value - initial_capital) / initial_capital) * 100
+                bh_returns.append(return_pct)
+            
+            bh_gain = first_result.buy_and_hold_gain  # Use stored value for label
+        except Exception as e:
+            # Fallback to linear interpolation if data loading fails
+            bh_gain = first_result.buy_and_hold_gain
+            bh_returns = [bh_gain * (i / len(date_index)) for i in range(len(date_index))]
+        
+        # Build equity curves for each strategy
+        fig, ax = plt.subplots(figsize=(16, 10))
+        
+        # Plot 2%pa benchmark
+        ax.plot(date_index, cash_returns, label='2% p.a. Benchmark', color='gray', linewidth=2, linestyle='--', alpha=0.7)
+        
+        # Plot buy-and-hold
+        ax.plot(date_index, bh_returns, label=f'Buy-and-Hold ({bh_gain:.1f}%)', color='blue', linewidth=2, alpha=0.7)
+        
+        # Plot each strategy
+        colors = plt.cm.tab10(range(len(display_results)))
+        for i, result in enumerate(display_results):
+            if not result.simulation.wallet_history:
+                continue
+            
+            # Extract returns over time
+            wallet_history = result.simulation.wallet_history
+            strategy_dates = [w.timestamp for w in wallet_history]
+            strategy_returns = [w.return_pct for w in wallet_history]
+            
+            # Interpolate to match date_index
+            strategy_series = pd.Series(strategy_returns, index=strategy_dates)
+            strategy_aligned = strategy_series.reindex(date_index, method='ffill').fillna(0.0)
+            
+            alpha = getattr(result, 'active_alpha', result.outperformance)
+            label = f"{result.config.name[:25]} (α={alpha:+.1f}%)"
+            ax.plot(date_index, strategy_aligned.values, label=label, color=colors[i], linewidth=1.5, alpha=0.8)
+        
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.3)
+        ax.set_xlabel('Date', fontsize=12)
+        ax.set_ylabel('Cumulative Return (%)', fontsize=12)
+        ax.set_title(f'Multi-Strategy Equity Curve vs 2% p.a. Benchmark (Top {len(display_results)})', 
+                     fontsize=14, fontweight='bold')
+        ax.legend(fontsize=9, loc='best', ncol=2)
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Save chart
+        if filename_prefix is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"equity_curve_vs_2pa_{timestamp}.png"
+        else:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{filename_prefix}_{timestamp}.png"
+        
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return str(output_path)
+    
+    def generate_performance_by_instrument(
+        self,
+        results: List[WalkForwardResult],
+        filename_prefix: Optional[str] = None,
+    ) -> str:
+        """
+        Generate chart showing performance breakdown by instrument.
+        
+        Only generated if results contain multiple instruments.
+        
+        Args:
+            results: List of walk-forward results
+            filename_prefix: Prefix for output filename
+            
+        Returns:
+            Path to the generated chart, or empty string if not applicable
+        """
+        if not results:
+            return ""
+        
+        # Collect instruments from all results
+        instruments = set()
+        for result in results:
+            if hasattr(result.config, 'instruments') and result.config.instruments:
+                instruments.update(result.config.instruments)
+        
+        # Only generate if we have multiple instruments
+        if len(instruments) <= 1:
+            return ""
+        
+        # Group results by instrument
+        by_instrument = {}
+        for result in results:
+            if hasattr(result.config, 'instruments') and result.config.instruments:
+                for instrument in result.config.instruments:
+                    if instrument not in by_instrument:
+                        by_instrument[instrument] = []
+                    by_instrument[instrument].append(result)
+        
+        # Calculate average alpha per instrument
+        instrument_alphas = {}
+        instrument_counts = {}
+        for instrument, inst_results in by_instrument.items():
+            alphas = [getattr(r, 'active_alpha', r.outperformance) for r in inst_results]
+            instrument_alphas[instrument] = np.mean(alphas) if alphas else 0.0
+            instrument_counts[instrument] = len(inst_results)
+        
+        # Create chart
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        instruments_list = sorted(instrument_alphas.keys())
+        alphas_list = [instrument_alphas[inst] for inst in instruments_list]
+        counts_list = [instrument_counts[inst] for inst in instruments_list]
+        
+        # Chart 1: Average alpha by instrument
+        colors = ['green' if a > 0 else 'red' for a in alphas_list]
+        bars1 = ax1.bar(instruments_list, alphas_list, color=colors, alpha=0.7)
+        ax1.axhline(y=0, color='black', linestyle='-', linewidth=1)
+        ax1.set_ylabel('Average Alpha (%)', fontsize=11)
+        ax1.set_title('Average Performance by Instrument', fontsize=12, fontweight='bold')
+        ax1.grid(True, alpha=0.3, axis='y')
+        
+        # Add value labels on bars
+        for bar, alpha in zip(bars1, alphas_list):
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{alpha:.1f}%', ha='center', va='bottom' if height >= 0 else 'top', fontsize=9)
+        
+        # Chart 2: Number of configs tested per instrument
+        bars2 = ax2.bar(instruments_list, counts_list, color='steelblue', alpha=0.7)
+        ax2.set_ylabel('Number of Configs Tested', fontsize=11)
+        ax2.set_title('Test Coverage by Instrument', fontsize=12, fontweight='bold')
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        # Add value labels
+        for bar, count in zip(bars2, counts_list):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{count}', ha='center', va='bottom', fontsize=9)
+        
+        plt.tight_layout()
+        
+        # Save chart
+        if filename_prefix is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"performance_by_instrument_{timestamp}.png"
+        else:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{filename_prefix}_{timestamp}.png"
+        
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return str(output_path)
+    
+    def generate_analysis_report(
+        self,
+        results: List[WalkForwardResult],
+        filename: Optional[str] = None,
+    ) -> str:
+        """
+        Generate markdown analysis report with best performers, metrics, and recommendations.
+        
+        Args:
+            results: List of walk-forward results
+            filename: Output filename (default: auto-generated)
+            
+        Returns:
+            Path to the generated report
+        """
+        if not results:
+            return ""
+        
+        # Sort by alpha
+        sorted_results = sorted(results, key=lambda r: getattr(r, 'active_alpha', r.outperformance), reverse=True)
+        
+        # Generate report
+        if filename is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"analysis_report_{timestamp}.md"
+        
+        output_path = self.output_dir / filename
+        
+        with open(output_path, 'w') as f:
+            f.write("# Grid Search Analysis Report\n\n")
+            f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"**Total Configurations Tested:** {len(results)}\n\n")
+            
+            # Top performers
+            f.write("## Top 10 Performers (by Alpha)\n\n")
+            f.write("| Rank | Strategy | Alpha (%) | Win Rate (%) | Trades | Expectancy (%) |\n")
+            f.write("|------|----------|-----------|--------------|--------|----------------|\n")
+            for i, result in enumerate(sorted_results[:10], 1):
+                alpha = getattr(result, 'active_alpha', result.outperformance)
+                f.write(f"| {i} | {result.config.name} | {alpha:.2f} | {result.simulation.win_rate:.1f} | "
+                       f"{result.simulation.total_trades} | {result.simulation.expectancy_pct:.2f} |\n")
+            f.write("\n")
+            
+            # Summary statistics
+            alphas = [getattr(r, 'active_alpha', r.outperformance) for r in results]
+            win_rates = [r.simulation.win_rate for r in results]
+            trades = [r.simulation.total_trades for r in results]
+            
+            f.write("## Summary Statistics\n\n")
+            f.write(f"- **Configs with Positive Alpha:** {sum(1 for a in alphas if a > 0)} ({sum(1 for a in alphas if a > 0)*100//len(alphas)}%)\n")
+            f.write(f"- **Average Alpha:** {np.mean(alphas):.2f}%\n")
+            f.write(f"- **Best Alpha:** {max(alphas):.2f}%\n")
+            f.write(f"- **Worst Alpha:** {min(alphas):.2f}%\n")
+            f.write(f"- **Average Win Rate:** {np.mean(win_rates):.1f}%\n")
+            f.write(f"- **Total Trades:** {sum(trades)}\n\n")
+            
+            # Best by category (if we can infer categories from names)
+            f.write("## Recommendations\n\n")
+            best = sorted_results[0]
+            best_alpha = getattr(best, 'active_alpha', best.outperformance)
+            f.write(f"**Best Overall Strategy:** `{best.config.name}`\n")
+            f.write(f"- Alpha: {best_alpha:.2f}%\n")
+            f.write(f"- Win Rate: {best.simulation.win_rate:.1f}%\n")
+            f.write(f"- Trades: {best.simulation.total_trades}\n")
+            f.write(f"- Expectancy: {best.simulation.expectancy_pct:.2f}%\n\n")
+            
+            if best_alpha > 0:
+                f.write("✅ **Recommendation:** Consider updating baseline with this configuration.\n\n")
+            else:
+                f.write("⚠️ **Note:** Even the best strategy has negative alpha. Review strategy parameters.\n\n")
+        
+        return str(output_path)
     
     def save_parameter_sensitivity_csv(
         self,

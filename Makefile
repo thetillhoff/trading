@@ -1,33 +1,33 @@
-.PHONY: help scraper scraper-list visualize multi-charts optimize-filters trading-signals evaluate-trades backtest backtest-grid clean download evaluate grid-search params timeline
+.PHONY: help clean download evaluate grid-search test test-cov
 
 # Default target
 help:
-	@echo "Trading System - Unified CLI"
+	@echo "Trading Strategy Backtesting System"
 	@echo ""
 	@echo "Core Commands:"
-	@echo "  make download              Download market data for instruments"
-	@echo "  make evaluate              Evaluate a trading strategy with charts"
-	@echo "  make grid-search           Compare multiple strategy configurations"
-	@echo "  make params                Show all configurable parameters"
-	@echo "  make timeline              Generate trade timeline from CSV"
+	@echo "  make download              Download/update market data for instruments"
+	@echo "  make evaluate              Evaluate a strategy (default: baseline.yaml, generates charts)"
+	@echo "  make grid-search           Compare multiple configs from configs/ (auto-parallel, auto-charts)"
+	@echo "  make test                  Run tests with pytest"
+	@echo "  make test-cov              Run tests with coverage report (development only)"
 	@echo ""
 	@echo "Command Options (append to any command):"
 	@echo "  ARGS='...'                 Pass CLI arguments"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make download ARGS='--list'                    # List available instruments"
-	@echo "  make download ARGS='djia sp500'                # Download specific data"
-	@echo "  make evaluate ARGS='--instrument djia --charts' # Evaluate with visualizations"
-	@echo "  make evaluate ARGS='--max-timeline-trades 50'  # Limit timeline trades"
-	@echo "  make grid-search ARGS='--instrument sp500'      # Compare strategies"
-	@echo "  make timeline ARGS='trades.csv'                # Visualize from CSV"
+	@echo "  make download ARGS='--list'                           # List available instruments"
+	@echo "  make download ARGS='djia sp500'                       # Download specific data"
+	@echo "  make evaluate                                           # Evaluate baseline.yaml with charts"
+	@echo "  make evaluate ARGS='--config configs/top_performers/ew_rsi.yaml'"
+	@echo "  make grid-search                                         # Test all configs in configs/"
+	@echo "  make grid-search ARGS='--config-dir configs/optimization'  # Test specific subdirectory"
 	@echo ""
 	@echo "Data Directory:"
 	@echo "  ./data/                    Downloaded market data (created by download command)"
 	@echo ""
-	@echo "Output:"
-	@echo "  Charts saved to current directory"
-	@echo "  CSV files for trade data export"
+	@echo "Results:"
+	@echo "  ./results/                 Per-config results (matching configs/ structure)"
+	@echo "  ./results/grid_search_*/    Grid search summary (charts, analysis)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean                 Remove unused Docker images"
@@ -51,11 +51,12 @@ evaluate:
 grid-search:
 	$(DOCKER_CLI) cli.grid_search $(ARGS)
 
-params:
-	$(DOCKER_CLI) cli.params
+# Testing
+test:
+	docker compose run --rm --build cli pytest
 
-timeline:
-	$(DOCKER_CLI) cli.timeline $(ARGS)
+test-cov:
+	docker compose run --rm --build cli pytest --cov=core --cov-report=term-missing --cov-report=html
 
 # Cleanup
 clean:

@@ -128,7 +128,7 @@ class PortfolioSimulator:
         self,
         initial_capital: float = 100.0,
         position_size_pct: float = 1.0,  # 1.0 = 100% of available cash per trade
-        max_positions: int = 1,  # Maximum concurrent positions
+        max_positions: Optional[int] = 1,  # Maximum concurrent positions (None = unlimited)
         max_days: Optional[int] = None,  # Maximum days to hold a position
         use_confidence_sizing: bool = False,  # Scale position size with indicator confirmations
         confidence_size_multiplier: float = 0.1,  # Additional % per confirmation
@@ -156,7 +156,7 @@ class PortfolioSimulator:
         """
         self.initial_capital = initial_capital
         self.position_size_pct = position_size_pct
-        self.max_positions = max_positions
+        self.max_positions = max_positions if max_positions is not None else 999999  # None = unlimited
         self.max_days = max_days
         self.use_confidence_sizing = use_confidence_sizing
         self.confidence_size_multiplier = confidence_size_multiplier

@@ -63,18 +63,9 @@ class ElliottWaveDetector:
         Initialize the Elliott Wave detector.
         
         Args:
-            min_wave_length: Minimum number of data points for a wave (None = no restriction).
-                            Practical filter, not from Elliott Wave theory. Must be set explicitly.
-            max_wave_length: Maximum number of data points for a wave (None = no restriction).
-                           Practical limit. Must be set explicitly.
-            retracement_threshold: Minimum retracement percentage to consider a wave
-                                  (0.236 = 23.6% Fibonacci level, based on Elliott Wave theory)
-        
-        Note: min_wave_length and max_wave_length are practical implementation filters,
-        not requirements from Elliott Wave theory. Elliott Wave theory focuses on wave
-        degrees (timeframes), internal structure, and relative proportions between waves,
-        not absolute minimum durations. By default, no restrictions are applied - these
-        must be set explicitly if filtering is desired.
+            min_wave_length: Minimum data points per wave (practical filter, not EW theory)
+            max_wave_length: Maximum data points per wave (practical limit)
+            retracement_threshold: Minimum retracement (default 0.236 = Fibonacci 23.6%)
         """
         self.min_wave_length = min_wave_length
         self.max_wave_length = max_wave_length

@@ -16,6 +16,7 @@ project_root = core_dir.parent
 sys.path.insert(0, str(project_root))
 
 from core.shared.types import SignalType, TradingSignal
+from core.shared.defaults import INDICATOR_WARMUP_PERIOD, ADX_REGIME_THRESHOLD
 from core.indicators.technical import TechnicalIndicators, IndicatorValues, check_buy_confirmation, check_sell_confirmation
 from core.indicators.elliott_wave import ElliottWaveDetector, Wave, WaveType, WaveLabel
 
@@ -53,9 +54,9 @@ class SignalDetector:
             macd_signal=getattr(config, 'macd_signal', 12),
         )
         
-        # Create Elliott Wave detector if enabled
+        # Create Elliott Wave detector if enabled (shared for both regular and inverted)
         self.elliott_detector = None
-        if getattr(config, 'use_elliott_wave', False):
+        if getattr(config, 'use_elliott_wave', False) or getattr(config, 'use_elliott_wave_inverted', False):
             self.elliott_detector = ElliottWaveDetector()
     
     def detect_signals(self, data: pd.Series) -> List[Signal]:
@@ -84,6 +85,11 @@ class SignalDetector:
         if getattr(self.config, 'use_elliott_wave', False) and self.elliott_detector:
             ew_signals = self._get_elliott_wave_signals(data, indicator_df)
             signals.extend(ew_signals)
+        
+        # Get signals from inverted Elliott Wave (for sell signal generation)
+        if getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
+            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            signals.extend(inverted_ew_signals)
         
         # Filter by signal type
         signal_types = getattr(self.config, 'signal_types', 'all')
@@ -124,6 +130,11 @@ class SignalDetector:
         if getattr(self.config, 'use_elliott_wave', False) and self.elliott_detector:
             ew_signals = self._get_elliott_wave_signals(data, indicator_df)
             signals.extend(ew_signals)
+        
+        # Get signals from inverted Elliott Wave (for sell signal generation)
+        if getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
+            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            signals.extend(inverted_ew_signals)
 
         # Filter by signal type
         signal_types = getattr(self.config, 'signal_types', 'all')
@@ -137,6 +148,24 @@ class SignalDetector:
         signals = self._deduplicate_signals(signals)
 
         return signals, indicator_df
+
+    def _invert_price_data(self, data: pd.Series) -> pd.Series:
+        """
+        Invert price data to detect bearish patterns as bullish patterns.
+        
+        Uses: inverted_price = max_price + min_price - price
+        This preserves the relative structure while flipping the direction.
+        
+        Args:
+            data: Original price time series
+            
+        Returns:
+            Inverted price series with same index
+        """
+        max_price = data.max()
+        min_price = data.min()
+        inverted_data = max_price + min_price - data
+        return inverted_data
 
     def _uses_technical_indicators(self) -> bool:
         """Check if any technical indicators are enabled."""
@@ -152,10 +181,10 @@ class SignalDetector:
         """Generate signals from technical indicators (RSI, EMA, MACD)."""
         signals = []
         
-        if indicator_df is None or len(indicator_df) < 50:
+        if indicator_df is None or len(indicator_df) < INDICATOR_WARMUP_PERIOD:
             return signals
         
-        start_idx = 50  # Skip initial period where indicators aren't calculated
+        start_idx = INDICATOR_WARMUP_PERIOD
         
         for i in range(start_idx, len(indicator_df)):
             row = indicator_df.iloc[i]
@@ -319,6 +348,146 @@ class SignalDetector:
                 signals.append(signal)
         
         return signals
+    
+    def _get_inverted_elliott_wave_signals(
+        self,
+        data: pd.Series,
+        indicator_df: Optional[pd.DataFrame] = None
+    ) -> List[Signal]:
+        """
+        Generate signals from inverted Elliott Wave patterns (for sell signal generation).
+        
+        Inverts price data, runs Elliott Wave detection on inverted data, then inverts
+        the signal types to generate sell signals from bearish patterns.
+        
+        Args:
+            data: Original price time series
+            indicator_df: Technical indicators dataframe (optional)
+            
+        Returns:
+            List of trading signals (inverted from detected waves)
+        """
+        signals = []
+        
+        if not getattr(self.config, 'use_elliott_wave_inverted', False):
+            return signals
+        
+        if not self.elliott_detector:
+            return signals
+        
+        # Invert price data
+        inverted_data = self._invert_price_data(data)
+        
+        # Detect waves on inverted data
+        min_confidence = getattr(self.config, 'min_confidence_inverted', 0.65)
+        min_wave_size = getattr(self.config, 'min_wave_size_inverted', 0.02)
+        
+        try:
+            waves = self.elliott_detector.detect_waves(
+                inverted_data,
+                min_confidence=min_confidence,
+                min_wave_size_ratio=min_wave_size,
+                only_complete_patterns=False
+            )
+        except Exception as e:
+            return signals  # Return empty on error
+        
+        # Generate signals from inverted waves
+        # When a "buy" signal is detected on inverted data (bearish pattern),
+        # it becomes a "sell" signal in the original market
+        for wave in waves:
+            # Map inverted wave to original data indices
+            # The wave indices are relative to inverted_data, but we need to map
+            # them back to the original data (indices should be the same)
+            if wave.end_idx >= len(data):
+                continue
+            
+            # Convert wave to signal with inverted signal types
+            signal = self._inverted_wave_to_signal(wave, data, indicator_df)
+            if signal:
+                signals.append(signal)
+        
+        return signals
+    
+    def _inverted_wave_to_signal(
+        self,
+        wave: Wave,
+        data: pd.Series,
+        indicator_df: Optional[pd.DataFrame] = None
+    ) -> Optional[Signal]:
+        """
+        Convert an inverted Elliott Wave to a trading signal with inverted signal types.
+        
+        When waves are detected on inverted data:
+        - Inverted Wave 2/4 (end of correction in inverted = bearish pattern) → SELL signal
+        - Inverted Wave 5 (completion in inverted = bearish completion) → BUY signal
+        
+        Args:
+            wave: Elliott Wave pattern detected on inverted data
+            data: Original price series (not inverted)
+            indicator_df: Technical indicators dataframe (optional)
+        
+        Returns:
+            Trading signal with inverted signal type
+        """
+        if wave.end_idx >= len(data):
+            return None
+        
+        price = data.iloc[wave.end_idx]
+        timestamp = data.index[wave.end_idx]
+        
+        # Determine signal type from inverted wave
+        # On inverted data, what looks like a buy (Wave 2/4) is actually a sell
+        # and what looks like a sell (Wave 5) is actually a buy
+        if wave.wave_type == WaveType.IMPULSE:
+            if wave.label == WaveLabel.WAVE_2:
+                # Inverted Wave 2 (correction in inverted = bearish pattern) → SELL
+                signal_type = SignalType.SELL
+                base_confidence = wave.confidence * 0.8
+                base_reasoning = "Inverted Elliott Wave: End of Wave 2 correction (bearish pattern)"
+            
+            elif wave.label == WaveLabel.WAVE_4:
+                # Inverted Wave 4 (correction in inverted = bearish pattern) → SELL
+                signal_type = SignalType.SELL
+                base_confidence = wave.confidence * 0.7
+                base_reasoning = "Inverted Elliott Wave: End of Wave 4 correction (bearish pattern)"
+            
+            elif wave.label == WaveLabel.WAVE_5:
+                # Inverted Wave 5 (completion in inverted = bearish completion) → BUY
+                signal_type = SignalType.BUY
+                base_confidence = wave.confidence * 0.9
+                base_reasoning = "Inverted Elliott Wave: End of Wave 5 (bearish completion)"
+            
+            else:
+                # Other wave labels not used for signals
+                return None
+        else:
+            # Non-impulse waves not used for signals
+            return None
+        
+        # Create signal with inverted type
+        signal = Signal(
+            signal_type=signal_type,
+            timestamp=timestamp,
+            price=price,
+            confidence=base_confidence,
+            source="elliott_inverted",
+            reasoning=base_reasoning,
+            wave=wave,
+            indicator_confirmations=0,
+        )
+        
+        # Check technical indicator confirmation if available
+        if indicator_df is not None and self._uses_technical_indicators():
+            confirmed, reason, count = self._check_indicator_confirmation(
+                signal, indicator_df
+            )
+            if confirmed:
+                signal.reasoning += f" | {reason}"
+                signal.indicator_confirmations = count
+                signal.source = "combined_inverted"
+        
+        return signal
     
     def _wave_to_signal(
         self,
@@ -504,8 +673,9 @@ class SignalDetector:
             return "BEAR"
         
         # Regime detection logic:
-        # Strong trend (ADX > 30) + direction from MA slope
-        if adx > 30:
+        # Strong trend (ADX > threshold) + direction from MA slope
+        adx_threshold = getattr(self.config, 'adx_threshold', ADX_REGIME_THRESHOLD)
+        if adx > adx_threshold:
             if ma_slope > 0:
                 return "BULL"  # Strong bull trend
             else:

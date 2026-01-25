@@ -15,6 +15,7 @@ sys.path.insert(0, str(core_dir.parent))
 
 from core.data.loader import DataLoader
 from core.signals.config import StrategyConfig, BASELINE_CONFIG, PRESET_CONFIGS
+from core.signals.config_loader import load_config_from_yaml
 from core.signals.detector import SignalDetector
 from core.evaluation.walk_forward import WalkForwardEvaluator
 from core.evaluation.portfolio import PortfolioSimulator
@@ -64,14 +65,15 @@ Examples:
         help="Use a preset configuration",
     )
     parser.add_argument(
+        "--config",
+        type=str,
+        default="configs/baseline.yaml",
+        help="Load configuration from YAML file (default: configs/baseline.yaml)",
+    )
+    parser.add_argument(
         "--column",
         default="Close",
         help="Price column to use (default: Close)",
-    )
-    parser.add_argument(
-        "--charts",
-        action="store_true",
-        help="Generate visualization charts",
     )
     parser.add_argument(
         "--max-timeline-trades",
@@ -136,42 +138,53 @@ Examples:
     
     args = parser.parse_args()
     
-    # Load data
-    try:
-        loader = DataLoader.from_scraper(args.instrument)
-        df = loader.load(
-            start_date=args.start_date,
-            end_date=args.end_date,
-        )
-        data = df[args.column] if args.column in df.columns else df.iloc[:, 0]
-    except Exception as e:
-        print(f"Error loading data: {e}")
-        return 1
+    # Print evaluation mode header
+    print("=" * 80)
+    print("SINGLE STRATEGY EVALUATION")
+    print("Mode: Detailed analysis vs buy-and-hold")
+    print("=" * 80)
+    print()
     
-    print(f"Loaded {len(data)} data points from {data.index.min()} to {data.index.max()}")
+    # Create configuration - default to baseline.yaml, or use preset, or build from flags
+    config_based_execution = False
+    config = None
     
-    # Create configuration
     if args.preset:
         config = PRESET_CONFIGS[args.preset]
-    else:
-        # Start with baseline, then override with any explicitly provided flags
+        print(f"Using preset configuration: {args.preset}")
+    elif args.config:
+        # Load from YAML file (default: baseline.yaml)
+        try:
+            config = load_config_from_yaml(args.config)
+            print(f"Loaded configuration from: {args.config}")
+            
+            # Check if config specifies instruments and dates (new multi-instrument format)
+            if config.instruments and config.start_date and config.end_date:
+                config_based_execution = True
+                print(f"  Using config-specified data:")
+                print(f"    Instruments: {', '.join(config.instruments)}")
+                print(f"    Date range: {config.start_date} to {config.end_date}")
+                print()
+        except Exception as e:
+            print(f"Error loading config file: {e}")
+            return 1
+    
+    if config is None:
+        # Fallback: build from flags (backward compatibility)
         from dataclasses import asdict
         config_dict = asdict(BASELINE_CONFIG)
         config_dict['name'] = 'custom'
         config_dict['description'] = 'Custom configuration (defaults to baseline)'
         
-        # Only override if flags are explicitly provided (check if any indicator flag was set)
-        # Note: argparse sets default=False, so we check if user explicitly set any indicator
+        # Only override if flags are explicitly provided
         has_indicator_flags = (args.use_elliott_wave or args.use_rsi or 
                               args.use_ema or args.use_macd)
         
         if has_indicator_flags:
-            # User explicitly set indicator flags, use those
             config_dict['use_elliott_wave'] = args.use_elliott_wave
             config_dict['use_rsi'] = args.use_rsi
             config_dict['use_ema'] = args.use_ema
             config_dict['use_macd'] = args.use_macd
-        # else: keep baseline defaults (EMA + MACD)
         
         # Add parameter overrides if provided
         if args.min_confidence is not None:
@@ -204,7 +217,6 @@ Examples:
             config_dict['use_regime_detection'] = args.use_regime_detection
         if args.use_confirmation_modulation:
             config_dict['use_confirmation_modulation'] = args.use_confirmation_modulation
-            # When using confirmation modulation, disable confidence sizing
             config_dict['use_confidence_sizing'] = False
         
         # Merge with baseline for defaults
@@ -226,20 +238,47 @@ Examples:
     if config.use_macd:
         indicators.append("MACD")
     print(", ".join(indicators) if indicators else "None")
+    print()
     
-    # Run evaluation
+    # Run evaluation (config-based or CLI-based)
     evaluator = WalkForwardEvaluator(
         lookback_days=config.lookback_days,
         step_days=config.step_days,
     )
     
-    result = evaluator.evaluate(
-        data,
-        config,
-        start_date=pd.to_datetime(args.start_date) if args.start_date else None,
-        end_date=pd.to_datetime(args.end_date) if args.end_date else None,
-        verbose=True,
-    )
+    if config_based_execution:
+        # Use config's instruments and dates (multi-instrument support)
+        result = evaluator.evaluate_multi_instrument(config, verbose=True)
+        # For charts, load data from first instrument
+        data = DataLoader.from_instrument(
+            config.instruments[0],
+            start_date=config.start_date,
+            end_date=config.end_date,
+            column=config.column
+        )
+    else:
+        # Old flow: Load data from CLI args
+        try:
+            loader = DataLoader.from_scraper(args.instrument)
+            df = loader.load(
+                start_date=args.start_date,
+                end_date=args.end_date,
+            )
+            data = df[args.column] if args.column in df.columns else df.iloc[:, 0]
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            return 1
+        
+        print(f"Loaded {len(data)} data points from {data.index.min()} to {data.index.max()}")
+        
+        # Run evaluation with CLI-provided dates
+        result = evaluator.evaluate(
+            data,
+            config,
+            start_date=pd.to_datetime(args.start_date) if args.start_date else None,
+            end_date=pd.to_datetime(args.end_date) if args.end_date else None,
+            verbose=True,
+        )
     
     # Print results
     print("\n" + "=" * 80)
@@ -253,45 +292,58 @@ Examples:
     print(f"Alpha: {getattr(result, 'active_alpha', result.outperformance):.2f}%")
     print(f"Expectancy: {result.simulation.expectancy_pct:.2f}%")
     
-    # Generate charts and CSV if requested
-    if args.charts:
-        from datetime import datetime
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Create output directory and timestamp
+    from datetime import datetime
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Determine output directory based on config
+    if config_based_execution:
+        # Use config-based path structure
+        output_dir = Path("results") / "sample_evaluations" / config.name
+    else:
+        # Use instrument-based path
+        output_dir = Path("results") / "sample_evaluations" / args.instrument
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create reporter
+    reporter = ComparisonReporter(output_dir=str(output_dir))
+    
+    # Always generate charts and CSV
+    # Save indicators CSV (always generated)
+    indicators_csv = evaluator.save_indicators_csv(output_dir, f"indicators_{timestamp}", config=config)
+    if indicators_csv:
+        print(f"Indicators CSV saved: {indicators_csv}")
 
-        output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
-        reporter = ComparisonReporter(output_dir=str(output_dir))
+    # Generate trade timeline (shows best/worst trades for readability)
+    total_trades = result.summary.total_trades
+    top_n = max(50, int(total_trades * 0.2)) if total_trades > 50 else None
 
-        # Save indicators CSV (always generated when charts are requested)
-        indicators_csv = evaluator.save_indicators_csv(output_dir, f"indicators_{timestamp}", config=config)
-        if indicators_csv:
-            print(f"Indicators CSV saved: {indicators_csv}")
+    timeline_path = reporter.generate_trade_timeline(
+        result, data,
+        filename=f"trade_timeline_{timestamp}.png",
+        show_annotations=True,
+        annotation_top_n=top_n,
+        max_trades=args.max_timeline_trades,
+    )
 
-        # Generate trade timeline (shows best/worst trades for readability)
-        total_trades = result.summary.total_trades
-        top_n = max(50, int(total_trades * 0.2)) if total_trades > 50 else None
-
-        timeline_path = reporter.generate_trade_timeline(
-            result, data,
-            filename=f"trade_timeline_{timestamp}.png",
-            show_annotations=True,
-            annotation_top_n=top_n,
-            max_trades=args.max_timeline_trades,
-        )
-
-        # Save trades CSV with ALL trades
-        trades_csv = reporter.save_trades_csv(result, filename=f"trades_full_{timestamp}.csv")
-        if trades_csv:
-            print(f"\nTrades CSV saved: {trades_csv} (all {total_trades} trades)")
-        
-        # Save configuration summary to text file
-        config_path = output_dir / f"config_{timestamp}.txt"
-        with open(config_path, 'w') as f:
+    # Save trades CSV with ALL trades
+    trades_csv = reporter.save_trades_csv(result, filename=f"trades_full_{timestamp}.csv")
+    if trades_csv:
+        print(f"\nTrades CSV saved: {trades_csv} (all {total_trades} trades)")
+    
+    # Save configuration summary to text file
+    config_path = output_dir / f"config_{timestamp}.txt"
+    with open(config_path, 'w') as f:
             f.write(f"CONFIGURATION SUMMARY\n")
             f.write(f"{'='*80}\n")
             f.write(f"Timestamp: {timestamp}\n")
             f.write(f"Strategy: {config.name}\n")
-            f.write(f"Instrument: {args.instrument}\n")
-            f.write(f"Period: {args.start_date} to {args.end_date}\n")
+            if config_based_execution:
+                f.write(f"Instruments: {', '.join(config.instruments)}\n")
+                f.write(f"Period: {config.start_date} to {config.end_date}\n")
+            else:
+                f.write(f"Instrument: {args.instrument}\n")
+                f.write(f"Period: {args.start_date} to {args.end_date}\n")
             f.write(f"\n")
             f.write(f"INDICATORS\n")
             f.write(f"{'-'*80}\n")
@@ -332,28 +384,28 @@ Examples:
             f.write(f"Trade Scatter: trade_scatter_{timestamp}.png\n")
             f.write(f"Alpha Over Time: alpha_over_time_{timestamp}.png\n")
             f.write(f"Indicators CSV: indicators_{timestamp}_{timestamp}.csv\n")
-        print(f"Config summary saved: {config_path}")
-        
-        # Generate trade scatter plots
-        scatter_path = reporter.generate_trade_scatter_plots(
-            result,
-            filename=f"trade_scatter_{timestamp}.png",
-        )
-        
-        # Generate alpha over time chart
-        alpha_path = reporter.generate_alpha_over_time(
-            result, data,
-            filename=f"alpha_over_time_{timestamp}.png",
-        )
-        
-        print(f"\nCharts saved to {output_dir}")
-        if timeline_path:
-            trade_count = min(args.max_timeline_trades or total_trades, total_trades)
-            print(f"  Trade timeline: {timeline_path} (best/worst {trade_count} trades)")
-        if scatter_path:
-            print(f"  Trade scatter plots: {scatter_path} (all {total_trades} trades)")
-        if alpha_path:
-            print(f"  Alpha over time: {alpha_path}")
+    print(f"Config summary saved: {config_path}")
+    
+    # Generate trade scatter plots
+    scatter_path = reporter.generate_trade_scatter_plots(
+        result,
+        filename=f"trade_scatter_{timestamp}.png",
+    )
+    
+    # Generate alpha over time chart
+    alpha_path = reporter.generate_alpha_over_time(
+        result, data,
+        filename=f"alpha_over_time_{timestamp}.png",
+    )
+    
+    print(f"\nCharts saved to {output_dir}")
+    if timeline_path:
+        trade_count = min(args.max_timeline_trades or total_trades, total_trades)
+        print(f"  Trade timeline: {timeline_path} (best/worst {trade_count} trades)")
+    if scatter_path:
+        print(f"  Trade scatter plots: {scatter_path} (all {total_trades} trades)")
+    if alpha_path:
+        print(f"  Alpha over time: {alpha_path}")
     
     return 0
 

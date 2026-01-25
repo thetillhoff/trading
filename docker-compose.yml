@@ -9,3 +9,7 @@ services:
     working_dir: /app
     environment:
       - PYTHONPATH=/app
+    # Note: CPU limits are controlled by Docker Desktop settings (macOS)
+    # To use all cores, check Docker Desktop > Settings > Resources > CPUs
+    # The ProcessPoolExecutor will use up to the number of workers specified (default: 8)
+    # No explicit CPU limits here - Docker Desktop settings control this

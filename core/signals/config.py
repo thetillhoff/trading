@@ -5,7 +5,7 @@ Contains strategy configurations, presets, and grid search generation.
 All indicators (RSI, EMA, MACD, Elliott Wave) are treated equally.
 """
 from dataclasses import dataclass, field
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import sys
 from pathlib import Path
 
@@ -20,6 +20,7 @@ from core.shared.defaults import (
     EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     MACD_FAST, MACD_SLOW, MACD_SIGNAL,
     ELLIOTT_MIN_CONFIDENCE, ELLIOTT_MIN_WAVE_SIZE,
+    ELLIOTT_INVERTED_MIN_CONFIDENCE, ELLIOTT_INVERTED_MIN_WAVE_SIZE,
     RISK_REWARD_RATIO, POSITION_SIZE_PCT, MAX_POSITIONS,
     USE_CONFIDENCE_SIZING, CONFIDENCE_SIZE_MULTIPLIER,
     USE_CONFIRMATION_MODULATION, CONFIRMATION_SIZE_FACTORS,
@@ -33,6 +34,7 @@ class SignalConfig:
     """Configuration for signal generation (simplified version of StrategyConfig)."""
     # Indicator enable/disable
     use_elliott_wave: bool = False
+    use_elliott_wave_inverted: bool = False
     use_rsi: bool = False
     use_ema: bool = False
     use_macd: bool = False
@@ -40,6 +42,10 @@ class SignalConfig:
     # Elliott Wave parameters
     min_confidence: float = ELLIOTT_MIN_CONFIDENCE
     min_wave_size: float = ELLIOTT_MIN_WAVE_SIZE
+    
+    # Inverted Elliott Wave parameters (for sell signal generation)
+    min_confidence_inverted: float = ELLIOTT_INVERTED_MIN_CONFIDENCE
+    min_wave_size_inverted: float = ELLIOTT_INVERTED_MIN_WAVE_SIZE
     
     # Technical indicator parameters
     rsi_period: int = RSI_PERIOD
@@ -68,6 +74,11 @@ class StrategyConfig:
     use_elliott_wave: bool = False  # Elliott Wave is now just another indicator
     min_confidence: float = ELLIOTT_MIN_CONFIDENCE
     min_wave_size: float = ELLIOTT_MIN_WAVE_SIZE
+    
+    # Inverted Elliott Wave detection parameters (for sell signal generation via price inversion)
+    use_elliott_wave_inverted: bool = False
+    min_confidence_inverted: float = ELLIOTT_INVERTED_MIN_CONFIDENCE
+    min_wave_size_inverted: float = ELLIOTT_INVERTED_MIN_WAVE_SIZE
     
     # Indicator on/off settings (all indicators work the same way)
     use_rsi: bool = False
@@ -126,6 +137,7 @@ class StrategyConfig:
     # Market regime detection and adaptive signals
     use_regime_detection: bool = False  # Enable market regime detection (ADX + MA slope)
     invert_signals_in_bull: bool = True  # Invert EW signals in bull markets (counter-trend trading)
+    adx_threshold: float = 30.0  # ADX threshold for regime detection (default: 30)
     
     # Walk-forward parameters (from shared.defaults)
     step_days: int = STEP_DAYS
@@ -134,18 +146,24 @@ class StrategyConfig:
     # Data parameters
     column: str = "Close"
     granularity: str = "daily"
+    
+    # Instruments and date ranges (for config-based execution)
+    instruments: List[str] = field(default_factory=lambda: ["djia"])  # Default to DJIA for backward compat
+    start_date: Optional[str] = None  # Start date (YYYY-MM-DD), None = use all available data
+    end_date: Optional[str] = None    # End date (YYYY-MM-DD), None = use all available data
 
 
 # Current best baseline configuration
-# Comprehensive testing (2000-2010): Elliott Wave +13.05% Alpha, 48.2% win rate (BEST)
-# MACD-only: +9.39% Alpha | EMA+MACD: -0.61% Alpha (combining makes it worse)
+# Hypothesis test results (2026-01-24): ew_all_indicators +45.75% Alpha across all 10 periods
+# Elliott Wave + RSI + EMA + MACD combination is the clear winner
+# The "dilution hypothesis" is WRONG - combining indicators dramatically improves performance
 BASELINE_CONFIG = StrategyConfig(
     name="baseline",
-    description="Elliott Wave (min_wave_size: 0.02) - best performing strategy",
-    use_elliott_wave=True,   # BEST PERFORMER: +13.05% alpha, 48.2% win rate
-    use_rsi=False,           # AVOID: All configs failed (-12% to +2% alpha)
-    use_ema=False,           # AVOID: Wrong signals in bull markets (-8.26% alpha)
-    use_macd=False,          # Good standalone (+9.39%), but EW alone is better
+    description="Elliott Wave + RSI + EMA + MACD - Best performing strategy (+45.75% alpha)",
+    use_elliott_wave=True,   # Core indicator - required for best performance
+    use_rsi=True,            # Combined with EW: +28.71% alpha (standalone RSI fails)
+    use_ema=True,            # Combined with EW: improves signal quality
+    use_macd=True,           # Combined with EW: +25.71% alpha (best win rate: 49.1%)
     require_all_indicators=False,
     signal_types="all",      # Allow both buy and sell signals
     risk_reward=RISK_REWARD_RATIO,  # 2.0 - validated optimal

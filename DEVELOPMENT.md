@@ -1,101 +1,92 @@
 # Development Guidelines
 
+
 ## Project Overview
 
-This is a Python trading data project that downloads and analyzes DJIA (Dow Jones Industrial Average)
-historical data using the yfinance library. The project is containerized with Docker for easy deployment
-and reproducibility.
+Python trading strategy backtesting system with Elliott Wave pattern detection, technical indicators (RSI, EMA, MACD), and walk-forward evaluation. Containerized with Docker for reproducibility.
 
-## AI Assistant Guidelines
+**Note**: For general agent guidelines, Makefile usage, and code quality rules, see `AGENTS.md`. This file focuses on architecture and implementation details.
 
-**IMPORTANT**: When working on this project, AI assistants should:
-
-1. **Always consult DEVELOPMENT.md first** - Read this file to understand project structure, design
-   decisions, and development history before making changes.
-
-2. **Follow established patterns** - Adhere to the design decisions and patterns documented in this file.
-   If a proposed change conflicts with existing decisions, **ask the user for validation** before
-   proceeding.
-
-3. **Update DEVELOPMENT.md** - When making significant changes or adding new features, update this file
-   to reflect new design decisions or important user instructions.
-
-4. **Preserve user preferences** - Document important user instructions and preferences in this file so
-   they can be referenced in future AI chat sessions. **This is critical for new AI agents that don't
-   have historical knowledge**.
-
-### Important User Instructions
-
-**CRITICAL**: These instructions must be followed by all AI agents.
-
-- **Docker-first approach**: Always use Docker containers instead of local Python installation. The user
-  prefers `docker compose` (v2 syntax) over `docker-compose`.
-- **Never run Python directly**: Do NOT run `python` or `python3` commands directly on the host machine.
-  Always use Docker containers via `make run` or `docker run`. This ensures consistent environments and
-  avoids dependency issues.
-- **Makefile usage**: Prefer Makefile commands (`make up`, `make run`, etc.) for common operations.
-- **Data persistence**: CSV files should be used for caching downloaded data to avoid re-downloading on
-  each run.
-- **File naming**: Files should have descriptive, meaningful names that clearly indicate their purpose.
-- **No historical name references**: Do not keep references to old names (files, methods, variables,
-  etc.) in documentation. Update all references to current names immediately.
-- **Git commit at stable milestones**: When development reaches a stable milestone (completed feature,
-  fixed issues, significant improvements), **persist the milestone via git commit** with a descriptive
-  message and push to the remote repository. Stable milestones should be committed immediately.
-- **Keep documentation up to date**: Keep usage instructions in README files and Makefiles up to date
-  when making changes.
-- **Follow software engineering best practices**: Apply good practices throughout development:
-  - If a file becomes too long (e.g., >500 lines), consider splitting it into smaller modules
-  - Extract complex methods into separate functions or classes when they become unwieldy
-  - Maintain clear separation of concerns between modules
-  - Keep functions focused on a single responsibility
-- **Restructure when necessary**: Don't hesitate to reorganize the codebase to improve maintainability,
-  clarity, or structure.
-- **Standardize CLI arguments**: All visualization and analysis scripts should use consistent argument
-  names, formats, defaults, and help text.
-- **Conflict resolution**: If there's a conflict between user instructions and DEVELOPMENT.md, ask the
-  user to validate before proceeding.
 
 ## Key Design Decisions
 
-### 1. Docker-First Approach
+### Write & run tests
 
-Use Docker containers instead of local Python installation for consistent environments, isolated
-dependencies, and reproducible builds.
+Write tests for all code. 80% coverage is the goal.
+Run those tests to validate the code.
 
-### 2. Data Caching Strategy
+### Docker-First Approach
 
-Save downloaded data to CSV files to reduce API calls, enable faster subsequent runs, and allow
-offline operation after initial download.
+Use Docker containers for consistent environments, isolated dependencies, and reproducible builds.
 
-### 3. Makefile for Common Operations
+### Data Caching Strategy
 
-Use Makefiles instead of raw Docker commands for simplified workflows, consistent interface, and
-self-documenting commands via `make help`.
+Save downloaded data to CSV files to reduce API calls, enable faster subsequent runs, and allow offline operation after initial download.
 
-### 4. Independent App Architecture
+### Makefile for Common Operations
 
-Each app (scraper, visualization) has its own Dockerfile and requirements.txt for independence,
-scheduling flexibility, dependency isolation, and maintainability.
+Use Makefiles for simplified workflows, consistent interface, and self-documenting commands via `make help`.
 
-### 5. Self-Contained App Documentation
+### Independent App Architecture
 
-Each app has its own README.md and Makefile for standalone usability without AI assistance or
-project-wide knowledge.
+Each app has its own Dockerfile and requirements.txt for independence, scheduling flexibility, dependency isolation, and maintainability.
 
-### 6. Modular Visualization Architecture
+### Modular Architecture
 
-Separate visualization into loader, processor, and visualizer components for single responsibility,
-extensibility, testability, and reusability.
+Separate components for data loading, indicator calculation, signal detection, evaluation, and reporting for single responsibility, extensibility, testability, and reusability.
 
-### 7. Standardized CLI Arguments
+### Standardized CLI Arguments
 
 All scripts use consistent argument names, formats, defaults, and help text:
 
-- `--start-date`: Start date (inclusive) in format YYYY-MM-DD (optional)
-- `--end-date`: End date (inclusive) in format YYYY-MM-DD (optional)
-- `--column`: Column to analyze/visualize (default: Close). Available: Close, High, Low, Open, Volume
-- `--min-confidence`: Minimum confidence (0.0-1.0) for wave detection (default: 0.6)
-- `--min-wave-size`: Minimum wave size as ratio of price range (default: 0.05 = 5%)
-- `--granularity`: Time granularity: daily, weekly, monthly, yearly (default: daily)
-- `--aggregation`: Aggregation method: mean, max, min, median, sum, first, last (default: mean)
+- `--start-date`, `--end-date`: Date ranges (YYYY-MM-DD)
+- `--column`: Price column (default: Close)
+- `--config`: YAML config file path
+- `--config-dir`: Directory of YAML configs for grid search
+
+
+## Architecture
+
+### Data Flow
+
+```
+DataLoader (core/data/) → CSV cache from yfinance
+    ↓
+Indicators (core/indicators/) → RSI, EMA, MACD, ADX, Elliott Wave
+    ↓
+Signal Detection (core/signals/) → TradingSignal + targets/stops
+    ↓
+Evaluation (core/evaluation/) → WalkForwardEvaluator + PortfolioSimulator
+    ↓
+Reporting (core/grid_test/) → Charts + CSV results
+```
+
+### Module Responsibilities
+
+- **core/data/**: Download and load OHLCV data (yfinance → CSV cache)
+- **core/indicators/**: Calculate indicator values (no signals, just values)
+- **core/signals/**: Generate trading signals from indicator values
+- **core/evaluation/**: Backtest strategies with realistic capital management
+- **core/shared/**: Centralized defaults and shared types (single source of truth)
+- **cli/**: Command-line interface (all operations via `make`)
+
+### Extension Points
+
+**Add New Indicator:**
+
+1. Create class in `core/indicators/` implementing `Indicator` interface
+2. Add parameters to `core/shared/defaults.py`
+3. Update `TechnicalIndicators.calculate_all()` to include new indicator
+4. Add CLI arguments in `cli/evaluate.py`
+
+**Add New Strategy Preset:**
+
+1. Add entry to `PRESET_CONFIGS` dict in `core/signals/config.py`
+2. Specify which indicators to enable and their parameters
+3. Accessible via `make evaluate ARGS="--preset your_preset"`
+
+**Add New Performance Metric:**
+
+1. Extend `SimulationResult` dataclass in `core/evaluation/portfolio.py`
+2. Calculate metric in `PortfolioSimulator.simulate()`
+3. Add to reporting in `core/grid_test/reporter.py`

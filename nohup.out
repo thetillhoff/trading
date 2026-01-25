@@ -1,497 +1,0 @@
-docker compose run --rm --build cli python -u -m cli.evaluate --instrument djia --start-date 2000-01-01 --end-date 2010-01-01   --use-elliott-wave --use-macd --min-wave-size 0.02 --charts
-#1 [internal] load local bake definitions
-#1 reading from stdin 529B done
-#1 DONE 0.0s
-
-#2 [internal] load build definition from Dockerfile
-#2 transferring dockerfile: 790B done
-#2 DONE 0.0s
-
-#3 [internal] load metadata for docker.io/library/python:3.11-slim
-#3 DONE 1.1s
-
-#4 [internal] load .dockerignore
-#4 transferring context: 182B done
-#4 DONE 0.0s
-
-#5 [1/7] FROM docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2
-#5 resolve docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2 0.0s done
-#5 DONE 0.0s
-
-#6 [internal] load build context
-#6 transferring context: 3.85MB 0.1s done
-#6 DONE 0.1s
-
-#7 [4/7] COPY requirements.txt* ./
-#7 CACHED
-
-#8 [2/7] WORKDIR /app
-#8 CACHED
-
-#9 [3/7] RUN apt-get update && apt-get install -y --no-install-recommends     && rm -rf /var/lib/apt/lists/*
-#9 CACHED
-
-#10 [5/7] RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
-#10 CACHED
-
-#11 [6/7] RUN pip install --no-cache-dir     pandas     numpy     matplotlib     yfinance     scipy
-#11 CACHED
-
-#12 [7/7] COPY . .
-#12 DONE 0.3s
-
-#13 exporting to image
-#13 exporting layers
-#13 exporting layers 2.8s done
-#13 exporting manifest sha256:113a8d3cbfda38fa7fc366e8faf88b42ee4b749fd6dffccfa1ca3045732910f1 done
-#13 exporting config sha256:7308a16f1cc8da91ae103a69d3d1505c2322fe8d01489db5b81904fee2d347ba done
-#13 exporting attestation manifest sha256:19ae60db17ce43c0c349763b1a95acd14a5703f3279bf2fc72a5828bcf754bd2 done
-#13 exporting manifest list sha256:0f9f121cd6fdf8961d34566e2620af53f04166a92ea7a793229d96d9a95f909d done
-#13 naming to docker.io/library/trading-cli:latest done
-#13 unpacking to docker.io/library/trading-cli:latest
-#13 unpacking to docker.io/library/trading-cli:latest 0.5s done
-#13 DONE 3.4s
-
-#14 resolving provenance for metadata file
-#14 DONE 0.0s
-Loaded 2515 data points from 2000-01-03 00:00:00 to 2009-12-31 00:00:00
-Evaluating strategy: custom
-  Description: Custom configuration (defaults to baseline)
-  Indicators: Elliott Wave, MACD
-Walk-forward evaluation: 2000-04-12 to 2010-01-01
-  Lookback: 365 days, Step: 1 days
-  Config: custom
-  Evaluation points: 2445
-docker compose run --rm --build cli python -u -m cli.evaluate --instrument djia --start-date 2000-01-01 --end-date 2010-01-01   --use-elliott-wave --min-wave-size 0.015 --charts
-#1 [internal] load local bake definitions
-#1 reading from stdin 529B done
-#1 DONE 0.0s
-
-#2 [internal] load build definition from Dockerfile
-#2 transferring dockerfile: 790B done
-#2 DONE 0.0s
-
-#3 [internal] load metadata for docker.io/library/python:3.11-slim
-#3 DONE 0.3s
-
-#4 [internal] load .dockerignore
-#4 transferring context: 182B done
-#4 DONE 0.0s
-
-#5 [1/7] FROM docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2
-#5 resolve docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2 0.0s done
-#5 DONE 0.0s
-
-#6 [internal] load build context
-#6 transferring context: 81.44kB 0.0s done
-#6 DONE 0.0s
-
-#7 [4/7] COPY requirements.txt* ./
-#7 CACHED
-
-#8 [3/7] RUN apt-get update && apt-get install -y --no-install-recommends     && rm -rf /var/lib/apt/lists/*
-#8 CACHED
-
-#9 [5/7] RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
-#9 CACHED
-
-#10 [2/7] WORKDIR /app
-#10 CACHED
-
-#11 [6/7] RUN pip install --no-cache-dir     pandas     numpy     matplotlib     yfinance     scipy
-#11 CACHED
-
-#12 [7/7] COPY . .
-#12 DONE 0.3s
-
-#13 exporting to image
-#13 exporting layers
-#13 exporting layers 5.5s done
-#13 exporting manifest sha256:cb45e840773d964c7475aa6d714c74a50220dc6f9c36955e622c79bee18adec0 done
-#13 exporting config sha256:712095f6fb85fbfe7b1724eb471693a1b097f74293bbca2c0500ded73f7f9d50 done
-#13 exporting attestation manifest sha256:7421803f2859a6fb10b7b48d030fac0338f29d4244a07be5b9c1c66d64c41de4 0.0s done
-#13 exporting manifest list sha256:b378fc57f7d883197a2238967607a4965070267cc86be515bc2a106de439bb5c done
-#13 naming to docker.io/library/trading-cli:latest done
-#13 unpacking to docker.io/library/trading-cli:latest
-#13 unpacking to docker.io/library/trading-cli:latest 0.7s done
-#13 DONE 6.2s
-
-#14 resolving provenance for metadata file
-#14 DONE 0.0s
-docker compose run --rm --build cli python -u -m cli.evaluate --instrument djia --start-date 2000-01-01 --end-date 2010-01-01   --use-elliott-wave --min-wave-size 0.01 --charts
-#1 [internal] load local bake definitions
-#1 reading from stdin 529B done
-#1 DONE 0.0s
-
-#2 [internal] load build definition from Dockerfile
-#2 transferring dockerfile: 790B done
-#2 DONE 0.0s
-
-#3 [internal] load metadata for docker.io/library/python:3.11-slim
-#3 DONE 0.3s
-Loaded 2515 data points from 2000-01-03 00:00:00 to 2009-12-31 00:00:00
-Evaluating strategy: custom
-  Description: Custom configuration (defaults to baseline)
-  Indicators: Elliott Wave
-Walk-forward evaluation: 2000-04-12 to 2010-01-01
-  Lookback: 365 days, Step: 1 days
-  Config: custom
-
-#4 [internal] load .dockerignore
-#4 transferring context: 182B done
-#4 DONE 0.0s
-
-#5 [internal] load build context
-#5 transferring context: 83.52kB 0.1s done
-#5 DONE 0.1s
-
-#6 [1/7] FROM docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2
-#6 resolve docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2 0.1s done
-#6 DONE 0.1s
-
-#7 [4/7] COPY requirements.txt* ./
-#7 CACHED
-
-#8 [5/7] RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
-#8 CACHED
-
-#9 [2/7] WORKDIR /app
-#9 CACHED
-
-#10 [3/7] RUN apt-get update && apt-get install -y --no-install-recommends     && rm -rf /var/lib/apt/lists/*
-#10 CACHED
-
-#11 [6/7] RUN pip install --no-cache-dir     pandas     numpy     matplotlib     yfinance     scipy
-#11 CACHED
-
-#12 [7/7] COPY . .
-#12 DONE 0.4s
-
-#13 exporting to image
-#13 exporting layers
-  Evaluation points: 2445
-  Progress: 244/2445 (10%) - 15 signals - 0.2s  Progress: 488/2445 (20%) - 32 signals - 0.6s  Progress: 732/2445 (30%) - 44 signals - 0.8s  Progress: 976/2445 (40%) - 56 signals - 1.2s  Progress: 1220/2445 (50%) - 59 signals - 1.3s  Progress: 1464/2445 (60%) - 69 signals - 1.6s  Progress: 1708/2445 (70%) - 81 signals - 1.9s  Progress: 244/2445 (10%) - 38 signals - 20.8s  Progress: 1952/2445 (80%) - 92 signals - 2.2s  Progress: 2196/2445 (90%) - 107 signals - 2.4s  Progress: 2440/2445 (100%) - 115 signals - 2.6s  Progress: 2445/2445 (100%) - 115 signals - 2.6s  Signal detection completed in 2.6s                              
-  Total unique signals detected: 115
-  Simulating portfolio...
-    Portfolio simulation: 244/2445 (10%) - 13 trades closed - 0.0s    Portfolio simulation: 488/2445 (20%) - 31 trades closed - 0.0s    Portfolio simulation: 732/2445 (30%) - 42 trades closed - 0.0s    Portfolio simulation: 976/2445 (40%) - 54 trades closed - 0.0s    Portfolio simulation: 1220/2445 (50%) - 57 trades closed - 0.0s    Portfolio simulation: 1464/2445 (60%) - 67 trades closed - 0.0s    Portfolio simulation: 1708/2445 (70%) - 78 trades closed - 0.0s    Portfolio simulation: 1952/2445 (80%) - 90 trades closed - 0.0s    Portfolio simulation: 2196/2445 (90%) - 103 trades closed - 0.0s    Portfolio simulation: 2440/2445 (100%) - 113 trades closed - 0.0s    Portfolio simulation: 2445/2445 (100%) - 113 trades closed - 0.0s                                                                                  Portfolio simulation completed in 0.0s
-
-  Results:
-    Trades: 113
-    Win Rate: 48.7%
-    Avg Exposure: 11.7%
-    Total Return: 12.89%
-    Market (100% invested): -6.27%
-    Hybrid Return: 7.35%
-    Alpha vs Buy-and-Hold: +13.62%
-
-================================================================================
-EVALUATION RESULTS
-================================================================================
-Strategy: custom
-Total Trades: 113
-Win Rate: 48.7%
-Avg Exposure: 11.7%
-Total Return: 12.89%
-Alpha: 13.62%
-Expectancy: 0.57%
-/app/core/grid_test/reporter.py:433: UserWarning: You passed a edgecolor/edgecolors ('darkcoral') for an unfilled marker ('x').  Matplotlib is ignoring the edgecolor in favor of the facecolor.  This behavior may change in the future.
-  ax.scatter(exit_date, exit_price,
-#13 exporting layers 5.3s done
-#13 exporting manifest sha256:a68408426b3fd24a55e8c12d50ad85767a80980d5b71683d2b16376b079a7963 0.0s done
-#13 exporting config sha256:bf41488a9cc7e9d117a61cd2e3aacbda41fc88794a0e05be0425e16fafc615e2 done
-#13 exporting attestation manifest sha256:350109c8951c8e1793d236c68764524f83b4d451ee0e4fd0cdd296987d71f898 0.0s done
-#13 exporting manifest list sha256:3e0ea50d84ffe112964a74ede851c05a06a446ac3e207cb398fc6ddb7696fb31 0.0s done
-#13 naming to docker.io/library/trading-cli:latest done
-#13 unpacking to docker.io/library/trading-cli:latest
-#13 unpacking to docker.io/library/trading-cli:latest 2.7s done
-#13 DONE 8.4s
-
-#14 resolving provenance for metadata file
-#14 DONE 0.0s
-Loaded 2515 data points from 2000-01-03 00:00:00 to 2009-12-31 00:00:00
-Evaluating strategy: custom
-  Description: Custom configuration (defaults to baseline)
-  Indicators: Elliott Wave
-Walk-forward evaluation: 2000-04-12 to 2010-01-01
-  Lookback: 365 days, Step: 1 days
-  Config: custom
-
-Trades CSV saved: /app/trades_full_20260123_201804.csv (all 113 trades)
-Config summary saved: /app/config_20260123_201804.txt
-  Evaluation points: 2445
-  Progress: 244/2445 (10%) - 15 signals - 0.3s  Progress: 488/2445 (20%) - 33 signals - 0.7s  Progress: 732/2445 (30%) - 44 signals - 1.0s  Progress: 976/2445 (40%) - 56 signals - 1.3s  Progress: 1220/2445 (50%) - 59 signals - 1.5s  Progress: 1464/2445 (60%) - 69 signals - 1.8s  Progress: 1708/2445 (70%) - 81 signals - 3.4s  Progress: 1952/2445 (80%) - 92 signals - 4.1s  Progress: 2196/2445 (90%) - 107 signals - 4.4s
-Charts saved to /app
-  Trade timeline: /app/trade_timeline_20260123_201804.png (best/worst 100 trades)
-  Trade scatter plots: /app/trade_scatter_20260123_201804.png (all 113 trades)
-  Alpha over time: /app/alpha_over_time_20260123_201804.png
-  Progress: 2440/2445 (100%) - 115 signals - 4.9s  Progress: 2445/2445 (100%) - 115 signals - 4.9s  Signal detection completed in 4.9s                              
-  Total unique signals detected: 115
-  Simulating portfolio...
-    Portfolio simulation: 244/2445 (10%) - 13 trades closed - 0.0s    Portfolio simulation: 488/2445 (20%) - 31 trades closed - 0.0s    Portfolio simulation: 732/2445 (30%) - 42 trades closed - 0.0s    Portfolio simulation: 976/2445 (40%) - 54 trades closed - 0.0s    Portfolio simulation: 1220/2445 (50%) - 57 trades closed - 0.0s    Portfolio simulation: 1464/2445 (60%) - 67 trades closed - 0.0s    Portfolio simulation: 1708/2445 (70%) - 78 trades closed - 0.0s    Portfolio simulation: 1952/2445 (80%) - 90 trades closed - 0.0s    Portfolio simulation: 2196/2445 (90%) - 103 trades closed - 0.0s    Portfolio simulation: 2440/2445 (100%) - 113 trades closed - 0.0s    Portfolio simulation: 2445/2445 (100%) - 113 trades closed - 0.0s                                                                                  Portfolio simulation completed in 0.0s
-
-  Results:
-    Trades: 113
-    Win Rate: 48.7%
-    Avg Exposure: 11.7%
-    Total Return: 12.89%
-    Market (100% invested): -6.27%
-    Hybrid Return: 7.35%
-    Alpha vs Buy-and-Hold: +13.62%
-
-================================================================================
-EVALUATION RESULTS
-================================================================================
-Strategy: custom
-Total Trades: 113
-Win Rate: 48.7%
-Avg Exposure: 11.7%
-Total Return: 12.89%
-Alpha: 13.62%
-Expectancy: 0.57%
-/app/core/grid_test/reporter.py:433: UserWarning: You passed a edgecolor/edgecolors ('darkcoral') for an unfilled marker ('x').  Matplotlib is ignoring the edgecolor in favor of the facecolor.  This behavior may change in the future.
-  ax.scatter(exit_date, exit_price,
-
-Trades CSV saved: /app/trades_full_20260123_201818.csv (all 113 trades)
-Config summary saved: /app/config_20260123_201818.txt
-docker compose run --rm --build cli python -u -m cli.evaluate --instrument djia --start-date 2010-01-01 --end-date 2020-01-01   --use-elliott-wave --use-macd --min-wave-size 0.02 --charts
-#1 [internal] load local bake definitions
-#1 reading from stdin 529B done
-#1 DONE 0.0s
-
-#2 [internal] load build definition from Dockerfile
-#2 transferring dockerfile: 790B done
-#2 DONE 0.0s
-
-#3 [internal] load metadata for docker.io/library/python:3.11-slim
-#3 DONE 0.3s
-
-#4 [internal] load .dockerignore
-#4 transferring context: 182B done
-#4 DONE 0.0s
-
-#5 [1/7] FROM docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2
-#5 resolve docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2 0.0s done
-#5 DONE 0.0s
-
-#6 [internal] load build context
-#6 transferring context: 9.02MB 0.3s done
-#6 DONE 0.3s
-
-#7 [5/7] RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
-#7 CACHED
-
-#8 [2/7] WORKDIR /app
-#8 CACHED
-
-#9 [3/7] RUN apt-get update && apt-get install -y --no-install-recommends     && rm -rf /var/lib/apt/lists/*
-#9 CACHED
-
-#10 [4/7] COPY requirements.txt* ./
-#10 CACHED
-
-#11 [6/7] RUN pip install --no-cache-dir     pandas     numpy     matplotlib     yfinance     scipy
-#11 CACHED
-
-#12 [7/7] COPY . .
-#12 DONE 1.8s
-
-#13 exporting to image
-#13 exporting layers
-
-Charts saved to /app
-  Trade timeline: /app/trade_timeline_20260123_201818.png (best/worst 100 trades)
-  Trade scatter plots: /app/trade_scatter_20260123_201818.png (all 113 trades)
-  Alpha over time: /app/alpha_over_time_20260123_201818.png
-docker compose run --rm --build cli python -u -m cli.evaluate --instrument djia --start-date 2010-01-01 --end-date 2020-01-01   --use-elliott-wave --min-wave-size 0.015 --charts
-#1 [internal] load local bake definitions
-#1 reading from stdin 529B done
-#1 DONE 0.0s
-
-#2 [internal] load build definition from Dockerfile
-#2 transferring dockerfile:
-#2 transferring dockerfile: 790B 0.0s done
-#2 DONE 0.2s
-
-#3 [internal] load metadata for docker.io/library/python:3.11-slim
-#3 DONE 0.3s
-
-#4 [1/7] FROM docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2
-#4 resolve docker.io/library/python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2 0.0s done
-#4 DONE 0.0s
-
-#5 [internal] load .dockerignore
-#5 transferring context: 182B done
-#5 DONE 0.0s
-
-#6 [internal] load build context
-#13 exporting layers 8.4s done
-#6 transferring context: 33.50MB 0.5s done
-#6 DONE 0.5s
-
-#7 [6/7] RUN pip install --no-cache-dir     pandas     numpy     matplotlib     yfinance     scipy
-#7 CACHED
-
-#8 [5/7] RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
-#8 CACHED
-
-#9 [6/7] RUN pip install --no-cache-dir     pandas     numpy     matplotlib     yfinance     scipy
-#9 CACHED
-
-#10 [2/7] WORKDIR /app
-#10 CACHED
-
-#11 [3/7] RUN apt-get update && apt-get install -y --no-install-recommends     && rm -rf /var/lib/apt/lists/*
-#11 CACHED
-
-#12 [4/7] COPY requirements.txt* ./
-#12 CACHED
-
-#13 [7/7] COPY . .
-#13 exporting manifest sha256:1fca614ded54a87521091eaefec3dfe268c30abd9cc67d66c2c64f9edd9cb318 0.0s done
-#13 exporting config sha256:9aad8ee495d6d75fbe3bde7a3f8133bf3d0b38c6d62a5ca0a1c45ea1e51fadf2 0.0s done
-#13 exporting attestation manifest sha256:69c1a83ba91eade4951a7ccffa4f72c007a671d301811743242d71f68c2dc282 0.0s done
-#13 exporting manifest list sha256:48bc936f1f550dd2fb652921505f49c0f0734236414b1992833946cecbb33c4f 0.0s done
-#13 naming to docker.io/library/trading-cli:latest done
-#13 unpacking to docker.io/library/trading-cli:latest
-#13 DONE 0.9s
-
-#14 exporting to image
-#14 exporting layers
-#13 unpacking to docker.io/library/trading-cli:latest 0.9s done
-#13 DONE 9.5s
-
-#14 resolving provenance for metadata file
-#14 DONE 0.0s
-Loaded 2516 data points from 2010-01-04 00:00:00 to 2019-12-31 00:00:00
-Evaluating strategy: custom
-  Description: Custom configuration (defaults to baseline)
-  Indicators: Elliott Wave, MACD
-Walk-forward evaluation: 2010-04-14 to 2020-01-01
-  Lookback: 365 days, Step: 1 days
-  Config: custom
-  Evaluation points: 2447
-#14 exporting layers 5.9s done
-#14 exporting manifest sha256:d9ed825462f4c3047047361f51fe86c47a806800428431aab017f2f150edcd15 0.0s done
-#14 exporting config sha256:5645540d3c878549edd570c88669afea6c15dd0637710636f5342d945721f042 0.0s done
-#14 exporting attestation manifest sha256:7da82a8555710224b0e8e0f6427040cd716e78580b6616c5a03adf321016b586 0.0s done
-#14 exporting manifest list sha256:950ce18677b2bc804f9c169a3b056eac9f65d65813be235b76761b32241b8657 done
-#14 naming to docker.io/library/trading-cli:latest
-#14 naming to docker.io/library/trading-cli:latest done
-#14 unpacking to docker.io/library/trading-cli:latest
-#14 unpacking to docker.io/library/trading-cli:latest 1.2s done
-#14 DONE 7.3s
-
-#15 resolving provenance for metadata file
-#15 DONE 0.0s
-Loaded 2516 data points from 2010-01-04 00:00:00 to 2019-12-31 00:00:00
-Evaluating strategy: custom
-  Description: Custom configuration (defaults to baseline)
-  Indicators: Elliott Wave
-Walk-forward evaluation: 2010-04-14 to 2020-01-01
-  Lookback: 365 days, Step: 1 days
-  Config: custom
-  Evaluation points: 2447
-  Progress: 244/2447 (10%) - 7 signals - 0.3s  Progress: 488/2447 (20%) - 25 signals - 0.5s  Progress: 732/2447 (30%) - 35 signals - 1.0s  Progress: 976/2447 (40%) - 44 signals - 1.3s  Progress: 1220/2447 (50%) - 56 signals - 1.6s  Progress: 1464/2447 (60%) - 72 signals - 2.0s  Progress: 1708/2447 (70%) - 78 signals - 2.6s  Progress: 1952/2447 (80%) - 88 signals - 2.9s  Progress: 2196/2447 (90%) - 92 signals - 3.2s  Progress: 2440/2447 (100%) - 106 signals - 3.5s  Progress: 2447/2447 (100%) - 106 signals - 3.5s  Signal detection completed in 3.5s                              
-  Total unique signals detected: 106
-  Simulating portfolio...
-    Portfolio simulation: 244/2447 (10%) - 7 trades closed - 0.0s    Portfolio simulation: 488/2447 (20%) - 25 trades closed - 0.0s    Portfolio simulation: 732/2447 (30%) - 35 trades closed - 0.0s    Portfolio simulation: 976/2447 (40%) - 43 trades closed - 0.0s    Portfolio simulation: 1220/2447 (50%) - 55 trades closed - 0.0s    Portfolio simulation: 1464/2447 (60%) - 70 trades closed - 0.0s    Portfolio simulation: 1708/2447 (70%) - 76 trades closed - 0.0s    Portfolio simulation: 1952/2447 (80%) - 86 trades closed - 0.0s    Portfolio simulation: 2196/2447 (90%) - 90 trades closed - 0.0s    Portfolio simulation: 2440/2447 (100%) - 104 trades closed - 0.0s    Portfolio simulation: 2447/2447 (100%) - 104 trades closed - 0.0s                                                                                  Portfolio simulation completed in 0.0s
-
-  Results:
-    Trades: 104
-    Win Rate: 59.6%
-    Avg Exposure: 12.3%
-    Total Return: 20.67%
-    Market (100% invested): 156.57%
-    Hybrid Return: 157.97%
-    Alpha vs Buy-and-Hold: +1.40%
-
-================================================================================
-EVALUATION RESULTS
-================================================================================
-Strategy: custom
-Total Trades: 104
-Win Rate: 59.6%
-Avg Exposure: 12.3%
-Total Return: 20.67%
-Alpha: 1.40%
-Expectancy: 0.92%
-/app/core/grid_test/reporter.py:433: UserWarning: You passed a edgecolor/edgecolors ('darkcoral') for an unfilled marker ('x').  Matplotlib is ignoring the edgecolor in favor of the facecolor.  This behavior may change in the future.
-  ax.scatter(exit_date, exit_price,
-
-Trades CSV saved: /app/trades_full_20260123_201852.csv (all 104 trades)
-Config summary saved: /app/config_20260123_201852.txt
-
-Charts saved to /app
-  Trade timeline: /app/trade_timeline_20260123_201852.png (best/worst 100 trades)
-  Trade scatter plots: /app/trade_scatter_20260123_201852.png (all 104 trades)
-  Alpha over time: /app/alpha_over_time_20260123_201852.png
-  Progress: 488/2445 (20%) - 86 signals - 93.2s  Progress: 244/2447 (10%) - 33 signals - 35.1s  Progress: 732/2445 (30%) - 133 signals - 138.2s  Progress: 488/2447 (20%) - 82 signals - 85.8s  Progress: 976/2445 (40%) - 178 signals - 191.4s  Progress: 732/2447 (30%) - 125 signals - 142.4s  Progress: 1220/2445 (50%) - 217 signals - 243.2s  Progress: 976/2447 (40%) - 167 signals - 187.6s  Progress: 1464/2445 (60%) - 252 signals - 295.9s  Progress: 1220/2447 (50%) - 210 signals - 248.2s  Progress: 1708/2445 (70%) - 301 signals - 360.9s  Progress: 1464/2447 (60%) - 259 signals - 310.5s  Progress: 1708/2447 (70%) - 284 signals - 357.9s  Progress: 1952/2445 (80%) - 343 signals - 418.3s  Progress: 2196/2445 (90%) - 382 signals - 466.3s  Progress: 1952/2447 (80%) - 322 signals - 409.9s  Progress: 2440/2445 (100%) - 429 signals - 516.4s  Progress: 2445/2445 (100%) - 429 signals - 517.8s  Signal detection completed in 517.8s                              
-  Total unique signals detected: 429
-  Simulating portfolio...
-    Portfolio simulation: 244/2445 (10%) - 42 trades closed - 0.0s    Portfolio simulation: 488/2445 (20%) - 102 trades closed - 0.0s    Portfolio simulation: 732/2445 (30%) - 135 trades closed - 0.1s    Portfolio simulation: 976/2445 (40%) - 189 trades closed - 0.1s    Portfolio simulation: 1220/2445 (50%) - 218 trades closed - 0.1s    Portfolio simulation: 1464/2445 (60%) - 259 trades closed - 0.1s    Portfolio simulation: 1708/2445 (70%) - 310 trades closed - 0.1s    Portfolio simulation: 1952/2445 (80%) - 344 trades closed - 0.1s    Portfolio simulation: 2196/2445 (90%) - 389 trades closed - 0.1s    Portfolio simulation: 2440/2445 (100%) - 422 trades closed - 0.1s    Portfolio simulation: 2445/2445 (100%) - 422 trades closed - 0.1s                                                                                  Portfolio simulation completed in 0.1s
-
-  Results:
-    Trades: 422
-    Win Rate: 47.4%
-    Avg Exposure: 21.0%
-    Total Return: 21.20%
-    Market (100% invested): -6.27%
-    Hybrid Return: 16.25%
-    Alpha vs Buy-and-Hold: +22.51%
-
-================================================================================
-EVALUATION RESULTS
-================================================================================
-Strategy: custom
-Total Trades: 422
-Win Rate: 47.4%
-Avg Exposure: 21.0%
-Total Return: 21.20%
-Alpha: 22.51%
-Expectancy: 0.25%
-Indicators CSV saved: /app/indicators_20260123_202621_20260123_202621.csv
-/app/core/grid_test/reporter.py:433: UserWarning: You passed a edgecolor/edgecolors ('darkcoral') for an unfilled marker ('x').  Matplotlib is ignoring the edgecolor in favor of the facecolor.  This behavior may change in the future.
-  ax.scatter(exit_date, exit_price,
-
-Trades CSV saved: /app/trades_full_20260123_202621.csv (all 422 trades)
-Config summary saved: /app/config_20260123_202621.txt
-  Progress: 2196/2447 (90%) - 360 signals - 470.4s
-Charts saved to /app
-  Trade timeline: /app/trade_timeline_20260123_202621.png (best/worst 100 trades)
-  Trade scatter plots: /app/trade_scatter_20260123_202621.png (all 422 trades)
-  Alpha over time: /app/alpha_over_time_20260123_202621.png
-  Progress: 2440/2447 (100%) - 390 signals - 499.2s  Progress: 2447/2447 (100%) - 391 signals - 499.8s  Signal detection completed in 499.8s                              
-  Total unique signals detected: 391
-  Simulating portfolio...
-    Portfolio simulation: 244/2447 (10%) - 42 trades closed - 0.0s    Portfolio simulation: 488/2447 (20%) - 88 trades closed - 0.0s    Portfolio simulation: 732/2447 (30%) - 130 trades closed - 0.0s    Portfolio simulation: 976/2447 (40%) - 168 trades closed - 0.0s    Portfolio simulation: 1220/2447 (50%) - 218 trades closed - 0.0s    Portfolio simulation: 1464/2447 (60%) - 254 trades closed - 0.0s    Portfolio simulation: 1708/2447 (70%) - 283 trades closed - 0.0s    Portfolio simulation: 1952/2447 (80%) - 321 trades closed - 0.0s    Portfolio simulation: 2196/2447 (90%) - 355 trades closed - 0.0s    Portfolio simulation: 2440/2447 (100%) - 382 trades closed - 0.0s    Portfolio simulation: 2447/2447 (100%) - 382 trades closed - 0.0s                                                                                  Portfolio simulation completed in 0.0s
-
-  Results:
-    Trades: 382
-    Win Rate: 50.5%
-    Avg Exposure: 21.7%
-    Total Return: 27.40%
-    Market (100% invested): 156.57%
-    Hybrid Return: 149.98%
-    Alpha vs Buy-and-Hold: -6.59%
-
-================================================================================
-EVALUATION RESULTS
-================================================================================
-Strategy: custom
-Total Trades: 382
-Win Rate: 50.5%
-Avg Exposure: 21.7%
-Total Return: 27.40%
-Alpha: -6.59%
-Expectancy: 0.29%
-Indicators CSV saved: /app/indicators_20260123_202701_20260123_202701.csv
-/app/core/grid_test/reporter.py:433: UserWarning: You passed a edgecolor/edgecolors ('darkcoral') for an unfilled marker ('x').  Matplotlib is ignoring the edgecolor in favor of the facecolor.  This behavior may change in the future.
-  ax.scatter(exit_date, exit_price,
-
-Trades CSV saved: /app/trades_full_20260123_202701.csv (all 382 trades)
-Config summary saved: /app/config_20260123_202701.txt
-
-Charts saved to /app
-  Trade timeline: /app/trade_timeline_20260123_202701.png (best/worst 100 trades)
-  Trade scatter plots: /app/trade_scatter_20260123_202701.png (all 382 trades)
-  Alpha over time: /app/alpha_over_time_20260123_202701.png

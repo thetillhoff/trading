@@ -7,7 +7,7 @@ to confirm or filter trading signals.
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 import sys
 from pathlib import Path
 
@@ -127,7 +127,7 @@ class TechnicalIndicators:
         
         return macd_line, signal_line, histogram
     
-    def calculate_adx(self, prices: pd.Series, period: int = 14) -> pd.Series:
+    def calculate_adx(self, data: pd.DataFrame, period: int = 14) -> pd.Series:
         """
         Calculate ADX (Average Directional Index) for trend strength detection.
         
@@ -137,35 +137,58 @@ class TechnicalIndicators:
         - ADX < 20: Weak/no trend
         
         Args:
-            prices: Price series
+            data: DataFrame with 'High', 'Low', 'Close' columns OR Series with Close prices
             period: Period for ADX calculation (default: 14)
         
         Returns:
             Series with ADX values
         """
-        # Simplified ADX using price-based approximation
-        # True ADX requires High/Low/Close, but we only have Close prices
-        high = prices
-        low = prices
+        # Handle both DataFrame (preferred) and Series (fallback) input
+        if isinstance(data, pd.DataFrame) and 'High' in data.columns and 'Low' in data.columns and 'Close' in data.columns:
+            # Use proper High/Low/Close for accurate ADX
+            high = data['High']
+            low = data['Low']
+            close = data['Close']
+            
+            # True Range
+            prev_close = close.shift(1)
+            tr1 = high - low
+            tr2 = abs(high - prev_close)
+            tr3 = abs(low - prev_close)
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            
+            # Directional Movement
+            up_move = high - high.shift(1)
+            down_move = low.shift(1) - low
+            
+            plus_dm = pd.Series(0.0, index=data.index)
+            minus_dm = pd.Series(0.0, index=data.index)
+            
+            plus_dm[(up_move > down_move) & (up_move > 0)] = up_move[(up_move > down_move) & (up_move > 0)]
+            minus_dm[(down_move > up_move) & (down_move > 0)] = down_move[(down_move > up_move) & (down_move > 0)]
+        else:
+            # Fallback: use Close prices only (less accurate)
+            if isinstance(data, pd.Series):
+                prices = data
+            else:
+                prices = data['Close'] if 'Close' in data.columns else data.iloc[:, 0]
+            
+            high = prices
+            low = prices
+            
+            tr = high.rolling(2).max() - low.rolling(2).min()
+            tr = tr.fillna(0)
+            
+            up_move = high.diff()
+            down_move = -low.diff()
+            
+            plus_dm = pd.Series(0.0, index=prices.index)
+            minus_dm = pd.Series(0.0, index=prices.index)
+            
+            plus_dm[up_move > down_move] = up_move[up_move > down_move].clip(lower=0)
+            minus_dm[down_move > up_move] = down_move[down_move > up_move].clip(lower=0)
         
-        # True Range (simplified)
-        tr = high.rolling(2).max() - low.rolling(2).min()
-        tr = tr.fillna(0)
-        
-        # Directional Movement
-        up_move = high.diff()
-        down_move = -low.diff()
-        
-        # Initialize directional movement series
-        plus_dm = pd.Series(0.0, index=prices.index)
-        minus_dm = pd.Series(0.0, index=prices.index)
-        
-        # Positive directional movement
-        plus_dm[up_move > down_move] = up_move[up_move > down_move].clip(lower=0)
-        # Negative directional movement
-        minus_dm[down_move > up_move] = down_move[down_move > up_move].clip(lower=0)
-        
-        # Smoothed averages
+        # Smoothed averages using Wilder's smoothing
         atr = tr.rolling(period).mean()
         plus_di = 100 * (plus_dm.rolling(period).mean() / atr.replace(0, np.nan))
         minus_di = 100 * (minus_dm.rolling(period).mean() / atr.replace(0, np.nan))
@@ -178,18 +201,26 @@ class TechnicalIndicators:
         
         return adx.fillna(0)
     
-    def calculate_all(self, prices: pd.Series) -> pd.DataFrame:
+    def calculate_all(self, data: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
         """
         Calculate all indicators and return as DataFrame.
         
         Args:
-            prices: Price series with datetime index
+            data: Price series or DataFrame with OHLCV columns
             
         Returns:
             DataFrame with all indicator values
         """
-        df = pd.DataFrame(index=prices.index)
-        df['price'] = prices
+        # Handle both Series and DataFrame input
+        if isinstance(data, pd.Series):
+            prices = data
+            df = pd.DataFrame(index=prices.index)
+            df['price'] = prices
+        else:
+            # DataFrame with OHLCV columns
+            prices = data['Close'] if 'Close' in data.columns else data.iloc[:, 0]
+            df = pd.DataFrame(index=data.index)
+            df['price'] = prices
         
         # RSI
         df['rsi'] = self.calculate_rsi(prices)
@@ -220,7 +251,8 @@ class TechnicalIndicators:
         df['macd_bearish'] = (histogram < 0) | ((histogram < histogram_prev) & (histogram_prev > 0))
         
         # ADX (for regime detection - trend strength)
-        df['adx'] = self.calculate_adx(prices)
+        # Pass full data if available for accurate ADX, otherwise fall back to prices
+        df['adx'] = self.calculate_adx(data)
         
         # 50-day MA and slope (for regime detection - trend direction)
         df['ma_50'] = prices.rolling(50).mean()

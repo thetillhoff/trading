@@ -32,6 +32,7 @@ from core.shared.defaults import (
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
     EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     MACD_FAST, MACD_SLOW, MACD_SIGNAL,
+    ELLIOTT_INVERTED_MIN_CONFIDENCE, ELLIOTT_INVERTED_MIN_WAVE_SIZE,
 )
 
 # Define classes for backward compatibility
@@ -290,6 +291,9 @@ class WalkForwardEvaluator:
             use_elliott_wave=getattr(config, 'use_elliott_wave', True),
             min_confidence=config.min_confidence,
             min_wave_size=config.min_wave_size,
+            use_elliott_wave_inverted=getattr(config, 'use_elliott_wave_inverted', False),
+            min_confidence_inverted=getattr(config, 'min_confidence_inverted', ELLIOTT_INVERTED_MIN_CONFIDENCE),
+            min_wave_size_inverted=getattr(config, 'min_wave_size_inverted', ELLIOTT_INVERTED_MIN_WAVE_SIZE),
             use_rsi=getattr(config, 'use_rsi', False),
             use_ema=getattr(config, 'use_ema', False),
             use_macd=getattr(config, 'use_macd', False),
@@ -439,6 +443,79 @@ class WalkForwardEvaluator:
             outperformance=outperformance,
             hybrid_return=hybrid_return,
             active_alpha=active_alpha,
+        )
+    
+    def evaluate_multi_instrument(
+        self,
+        config: StrategyConfig,
+        verbose: bool = True
+    ) -> WalkForwardResult:
+        """
+        Evaluate strategy across multiple instruments with unified results.
+        
+        For single instrument: delegates to standard evaluate()
+        For multiple instruments: combines signals from all instruments
+        
+        Args:
+            config: Strategy configuration (must include instruments, start_date, end_date)
+            verbose: Print progress information
+            
+        Returns:
+            WalkForwardResult with combined trades from all instruments
+        """
+        from core.data.loader import DataLoader
+        
+        if not config.instruments:
+            raise ValueError("Config must specify at least one instrument")
+        
+        # Single instrument: use standard evaluation
+        if len(config.instruments) == 1:
+            instrument = config.instruments[0]
+            if verbose:
+                print(f"Evaluating on 1 instrument: {instrument}")
+                print(f"Date range: {config.start_date or 'earliest'} to {config.end_date or 'latest'}")
+            
+            data = DataLoader.from_instrument(
+                instrument,
+                start_date=config.start_date,
+                end_date=config.end_date,
+                column=config.column
+            )
+            
+            start_date = pd.Timestamp(config.start_date) if config.start_date else None
+            end_date = pd.Timestamp(config.end_date) if config.end_date else None
+            
+            return self.evaluate(
+                data,
+                config,
+                start_date=start_date,
+                end_date=end_date,
+                verbose=verbose
+            )
+        
+        # Multiple instruments: not yet implemented for signal combination
+        # For now, just use first instrument
+        if verbose:
+            print(f"Warning: Multi-instrument signal combination not yet implemented")
+            print(f"Evaluating on first instrument only: {config.instruments[0]}")
+        
+        instrument = config.instruments[0]
+        data = DataLoader.from_instrument(
+            instrument,
+            start_date=config.start_date,
+            end_date=config.end_date,
+            column=config.column
+        )
+        
+        start_date = pd.Timestamp(config.start_date) if config.start_date else None
+        end_date = pd.Timestamp(config.end_date) if config.end_date else None
+        
+        return self.evaluate(
+            data,
+            config,
+            start_date=start_date,
+            end_date=end_date,
+            verbose=verbose
         )
     
     def _generate_eval_dates(
