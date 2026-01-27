@@ -339,7 +339,13 @@ class WalkForwardEvaluator:
                 )
                 
                 # Add unique signals to our collection
+                # Determine instrument identifier (use first instrument from config for single-instrument)
+                instrument_id = config.instruments[0] if config.instruments else None
+                
                 for signal in signals_with_targets:
+                    # Set instrument identifier on signal
+                    signal.instrument = instrument_id
+                    
                     # Create a unique key for each signal to avoid duplicates
                     signal_key = (signal.timestamp, signal.signal_type, signal.price)
                     if signal_key in seen_signal_keys:
@@ -371,6 +377,7 @@ class WalkForwardEvaluator:
             initial_capital=100.0,
             position_size_pct=getattr(config, 'position_size_pct', 0.2),  # 20% per trade default
             max_positions=getattr(config, 'max_positions', 5),  # Up to 5 concurrent positions
+            max_positions_per_instrument=getattr(config, 'max_positions_per_instrument', None),
             max_days=config.max_days,
             use_confidence_sizing=getattr(config, 'use_confidence_sizing', False),
             confidence_size_multiplier=getattr(config, 'confidence_size_multiplier', 0.1),
@@ -379,6 +386,9 @@ class WalkForwardEvaluator:
             use_volatility_sizing=getattr(config, 'use_volatility_sizing', False),
             volatility_threshold=getattr(config, 'volatility_threshold', 0.03),
             volatility_size_reduction=getattr(config, 'volatility_size_reduction', 0.5),
+            use_flexible_sizing=getattr(config, 'use_flexible_sizing', False),
+            flexible_sizing_method=getattr(config, 'flexible_sizing_method', 'confidence'),
+            flexible_sizing_target_rr=getattr(config, 'flexible_sizing_target_rr', 2.5),
         )
         
         # Simulate the strategy

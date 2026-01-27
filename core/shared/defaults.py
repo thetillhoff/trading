@@ -52,6 +52,14 @@ CONFIRMATION_SIZE_FACTORS = {
     3: 2.0,
 }
 
+# Flexible position sizing (confidence/risk-reward based)
+USE_FLEXIBLE_SIZING = False  # Enable flexible sizing based on signal quality
+FLEXIBLE_SIZING_METHOD = "confidence"  # "confidence", "risk_reward", or "combined"
+FLEXIBLE_SIZING_TARGET_RR = 2.5  # Target risk/reward ratio for risk_reward method
+
+# Per-instrument position limits
+MAX_POSITIONS_PER_INSTRUMENT = None  # None = no limit, otherwise max positions per instrument
+
 # Trend filtering (only trade in direction of EMA trend)
 USE_TREND_FILTER = False
 

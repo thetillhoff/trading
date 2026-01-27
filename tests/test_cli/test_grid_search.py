@@ -15,7 +15,7 @@ class TestDatePrecedence:
     
     def test_config_dates_used_when_no_cli_args(self):
         """Config dates should be used when CLI args not provided."""
-        config = load_config_from_yaml('configs/hypothesis_tests/combination_tests/ew_all_indicators.yaml')
+        config = load_config_from_yaml('configs/baseline.yaml')
         
         # Simulate no CLI args
         cli_start = None
@@ -30,7 +30,7 @@ class TestDatePrecedence:
     
     def test_cli_dates_override_config_dates(self):
         """CLI dates should override config dates when provided."""
-        config = load_config_from_yaml('configs/hypothesis_tests/combination_tests/ew_all_indicators.yaml')
+        config = load_config_from_yaml('configs/baseline.yaml')
         
         # Simulate CLI args provided
         cli_start = "2018-01-01"
@@ -46,7 +46,7 @@ class TestDatePrecedence:
     
     def test_partial_cli_args(self):
         """Partial CLI args should override only specified values."""
-        config = load_config_from_yaml('configs/hypothesis_tests/combination_tests/ew_all_indicators.yaml')
+        config = load_config_from_yaml('configs/baseline.yaml')
         
         # Only start_date provided via CLI
         cli_start = "2015-01-01"
@@ -86,7 +86,7 @@ class TestInstrumentPrecedence:
     
     def test_config_instrument_used_when_no_cli(self):
         """Config instrument should be used when CLI arg not provided."""
-        config = load_config_from_yaml('configs/hypothesis_tests/combination_tests/ew_all_indicators.yaml')
+        config = load_config_from_yaml('configs/baseline.yaml')
         
         cli_instrument = None
         final_instruments = [cli_instrument] if cli_instrument else config.instruments
@@ -95,7 +95,7 @@ class TestInstrumentPrecedence:
     
     def test_cli_instrument_overrides_config(self):
         """CLI instrument should override config instrument."""
-        config = load_config_from_yaml('configs/hypothesis_tests/combination_tests/ew_all_indicators.yaml')
+        config = load_config_from_yaml('configs/baseline.yaml')
         
         cli_instrument = "sp500"
         final_instruments = [cli_instrument] if cli_instrument else config.instruments
@@ -123,7 +123,7 @@ class TestPrecedenceOrder:
     def test_full_precedence_chain(self):
         """Test complete precedence chain for all parameters."""
         # Config with values
-        config = load_config_from_yaml('configs/hypothesis_tests/combination_tests/ew_all_indicators.yaml')
+        config = load_config_from_yaml('configs/baseline.yaml')
         
         # CLI args provided
         cli_instrument = "nasdaq"

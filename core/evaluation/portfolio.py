@@ -68,6 +68,9 @@ class Position:
     exit_price: Optional[float] = None
     status: PositionStatus = PositionStatus.OPEN
     pnl: float = 0.0  # Profit/loss in currency units
+    
+    # Instrument identifier (for multi-instrument trading)
+    instrument: Optional[str] = None  # Instrument symbol (e.g., "djia", "sp500")
 
 
 @dataclass
@@ -129,6 +132,7 @@ class PortfolioSimulator:
         initial_capital: float = 100.0,
         position_size_pct: float = 1.0,  # 1.0 = 100% of available cash per trade
         max_positions: Optional[int] = 1,  # Maximum concurrent positions (None = unlimited)
+        max_positions_per_instrument: Optional[int] = None,  # Maximum positions per instrument (None = no limit)
         max_days: Optional[int] = None,  # Maximum days to hold a position
         use_confidence_sizing: bool = False,  # Scale position size with indicator confirmations
         confidence_size_multiplier: float = 0.1,  # Additional % per confirmation
@@ -137,6 +141,9 @@ class PortfolioSimulator:
         use_volatility_sizing: bool = False,  # Adjust position size based on volatility
         volatility_threshold: float = 0.03,  # ATR/price threshold for high volatility
         volatility_size_reduction: float = 0.5,  # Multiply size by this when volatile
+        use_flexible_sizing: bool = False,  # Enable flexible sizing based on signal quality
+        flexible_sizing_method: str = "confidence",  # "confidence", "risk_reward", or "combined"
+        flexible_sizing_target_rr: float = 2.5,  # Target risk/reward ratio for risk_reward method
     ):
         """
         Initialize the portfolio simulator.
@@ -145,6 +152,7 @@ class PortfolioSimulator:
             initial_capital: Starting capital (default: 100)
             position_size_pct: Base fraction of available cash to use per trade (0.0-1.0)
             max_positions: Maximum number of concurrent positions
+            max_positions_per_instrument: Maximum positions per instrument (None = no limit)
             max_days: Maximum days to hold a position (None = no limit)
             use_confidence_sizing: If True, scale position size based on indicator confirmations (additive)
             confidence_size_multiplier: Additional % per indicator confirmation (e.g., 0.1 = +10% per confirmation)
@@ -153,10 +161,14 @@ class PortfolioSimulator:
             use_volatility_sizing: If True, reduce position size when volatility (ATR/price) is high
             volatility_threshold: ATR/price ratio above which to reduce position size (default: 0.03 = 3%)
             volatility_size_reduction: Multiplier for position size in high volatility (default: 0.5 = 50%)
+            use_flexible_sizing: If True, scale position size based on signal confidence/risk-reward
+            flexible_sizing_method: Method for flexible sizing ("confidence", "risk_reward", or "combined")
+            flexible_sizing_target_rr: Target risk/reward ratio for risk_reward method
         """
         self.initial_capital = initial_capital
         self.position_size_pct = position_size_pct
         self.max_positions = max_positions if max_positions is not None else 999999  # None = unlimited
+        self.max_positions_per_instrument = max_positions_per_instrument
         self.max_days = max_days
         self.use_confidence_sizing = use_confidence_sizing
         self.confidence_size_multiplier = confidence_size_multiplier
@@ -165,6 +177,9 @@ class PortfolioSimulator:
         self.use_volatility_sizing = use_volatility_sizing
         self.volatility_threshold = volatility_threshold
         self.volatility_size_reduction = volatility_size_reduction
+        self.use_flexible_sizing = use_flexible_sizing
+        self.flexible_sizing_method = flexible_sizing_method
+        self.flexible_sizing_target_rr = flexible_sizing_target_rr
     
     def simulate_buy_and_hold(
         self,
@@ -334,6 +349,13 @@ class PortfolioSimulator:
                     if len(open_positions) >= self.max_positions:
                         continue  # Already at max positions
                     
+                    # Check per-instrument position limit
+                    instrument = getattr(sig, 'instrument', None)
+                    if instrument and self.max_positions_per_instrument is not None:
+                        instrument_positions = sum(1 for pos in open_positions if pos.instrument == instrument)
+                        if instrument_positions >= self.max_positions_per_instrument:
+                            continue  # Already at max positions for this instrument
+                    
                     if cash <= 0:
                         continue  # No cash available
                     
@@ -376,6 +398,46 @@ class PortfolioSimulator:
                             # High volatility - reduce position size
                             adjusted_size_pct *= self.volatility_size_reduction
                             position_size_method += "_vol_adjusted"
+                    
+                    # Apply flexible sizing if enabled (based on signal quality)
+                    if self.use_flexible_sizing:
+                        # Get signal confidence (0-1)
+                        signal_confidence = getattr(sig, 'confidence', 0.5)  # Default to 0.5 if not set
+                        
+                        # Calculate risk-reward ratio (will be calculated later, but we need it here)
+                        target_price = getattr(sig, 'target_price', None)
+                        stop_loss = getattr(sig, 'stop_loss', None)
+                        risk_reward_ratio = 0.0
+                        if target_price and stop_loss:
+                            entry_price = sig.price
+                            if original_signal_type == SignalType.BUY:
+                                risk_amount = entry_price - stop_loss
+                                reward_amount = target_price - entry_price
+                            else:  # SELL
+                                risk_amount = stop_loss - entry_price
+                                reward_amount = entry_price - target_price
+                            if risk_amount > 0:
+                                risk_reward_ratio = reward_amount / risk_amount
+                        
+                        # Apply flexible sizing based on method
+                        if self.flexible_sizing_method == "confidence":
+                            # Scale by confidence: size = base * confidence
+                            flexible_factor = signal_confidence
+                        elif self.flexible_sizing_method == "risk_reward":
+                            # Scale by risk/reward ratio: size = base * min(1.0, rr / target_rr)
+                            if risk_reward_ratio > 0:
+                                flexible_factor = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr)
+                            else:
+                                flexible_factor = 0.5  # Default if no RR calculated
+                        else:  # "combined"
+                            # Weighted combination: 60% confidence, 40% risk/reward
+                            confidence_factor = signal_confidence
+                            rr_factor = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr) if risk_reward_ratio > 0 else 0.5
+                            flexible_factor = 0.6 * confidence_factor + 0.4 * rr_factor
+                        
+                        # Apply flexible factor to adjusted size
+                        adjusted_size_pct = adjusted_size_pct * flexible_factor
+                        position_size_method += "_flexible"
                     
                     position_capital = total_portfolio_value * adjusted_size_pct
                     
@@ -444,6 +506,7 @@ class PortfolioSimulator:
                         position_size_method=position_size_method,
                         trend_filter_active=getattr(sig, 'trend_filter_active', False),
                         trend_direction=trend_direction,
+                        instrument=instrument,  # Store instrument identifier
                     )
                     
                     open_positions.append(pos)

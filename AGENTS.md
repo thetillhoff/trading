@@ -42,12 +42,35 @@ If I ask for adjustments to code I have provided you, do not repeat all of my co
 - **Extract complex methods**: Break down complex methods into separate functions or classes when they become unwieldy.
 - **Separation of concerns**: Maintain clear separation between modules.
 - **Single responsibility**: Keep functions focused on a single responsibility.
+- **DRY (Don't Repeat Yourself)**: Try to avoid repeating the same code or logic in multiple places.
+- **KISS (Keep it simple stupid)**: Try to keep things simple, and don't overcomplicate. This applies to the architecture, too. If something becomes complex, there's probably a redesign needed.
+- **Single source of truth**: Keep a single source of truth, both for configuration and documentation like `ROADMAP.md` & `HYPOTHESIS_TEST_RESULTS.md`.
+- **Automated testing**: Write tests for all code. 80% coverage is the goal. Run those tests automatically while developing new features and after making changes to validate the code. If you find something that should be tested, but isn't yet, add tests & run them without being asked.
 
 ### Documentation & Git
 
 - **Keep documentation up to date**: Update README files and Makefiles when making changes.
 - **No historical name references**: Do not keep references to old names (files, methods, variables, etc.) in documentation. Update all references to current names immediately.
 - **Git commit at stable milestones**: When development reaches a stable milestone (completed feature, fixed issues, significant improvements), **persist the milestone via git commit** with a descriptive message. Remind the use if you think they forgot.
+
+### Hypothesis Test Results (HYPOTHESIS_TEST_RESULTS.md)
+
+- **Scientific hypothesis style**: Each entry states a **hypothesis** (what is being tested), then **findings** (what was observed), then a **conclusion** (accepted/rejected/modified). Do not write in narrative form (“we ran tests…”, “latest run”, “next steps”).
+- **No operational context**: Do not reference run dates, result folders, or “test date / generated / configs tested” in the doc. It should read as a catalogue of hypotheses and evidence, not a lab log.
+- **Optimality claims**: If a conclusion states that “X is optimal”, always state **under which circumstances** (e.g. instrument, period, baseline config, objective). Example: “Under circumstances: walk-forward on DJIA, full period 2000–2020, EW+all indicators, position 0.35 — risk_reward 2.5 is optimal.”
+- **New hypotheses**: A new hypothesis is created the moment the configs for it are created.
+- **Auto cleanup**: If the results of a hypothesis were analyzed, the configs and result files can be deleted.
+- **Always keep baseline up to date**: The `config/baseline.yaml` should always be the best performing config, and the one that is used by the `make evaluate` command. Ensure it always contains the best performing config.
+
+### Roadmap (ROADMAP.md)
+
+- **Priority order**: The roadmap contains a prioritized list of next steps to improve the product. Even if there's just an idea or suggestion, it should be added there.
+- **Describe what, not how**: Each item states *what is being tested* or *what to build* (e.g. “Indicator params: whether EMA/MACD/RSI period choices beat baseline”). Do not use process instructions like “Run grid”, “add findings”, or “document in HYPOTHESIS_TEST_RESULTS”.
+- **In progress → hypothesis doc, not roadmap**: If a hypothesis is *currently being tested* (configs run, results pending), it belongs in HYPOTHESIS_TEST_RESULTS.md. Do not list it on the roadmap; the roadmap holds only work that is not yet started or is the next step after current work.
+- **Completed items**: If an item is completed, it should be removed from the roadmap.
+- **Unordered list**: The roadmap should be an unordered list, except for priority sections. That way, changes to the file are minimal when adding new items.
+- **No instructions**: The roadmap should not contain instructions on how to run tests or use the code. It only describes next steps to improve the product, in the tersest form possible without losing the gist.
+- **No current status**: The status quo is not a "roadmap" item, so it should not be described in it.
 
 ### Data & File Management
 

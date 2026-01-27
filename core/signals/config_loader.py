@@ -106,9 +106,13 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         risk_reward=risk.get('risk_reward', RISK_REWARD_RATIO),
         position_size_pct=risk.get('position_size_pct', POSITION_SIZE_PCT),
         max_positions=risk.get('max_positions', MAX_POSITIONS),
+        max_positions_per_instrument=risk.get('max_positions_per_instrument', MAX_POSITIONS_PER_INSTRUMENT),
         use_confidence_sizing=risk.get('use_confidence_sizing', USE_CONFIDENCE_SIZING),
         confidence_size_multiplier=risk.get('confidence_size_multiplier', CONFIDENCE_SIZE_MULTIPLIER),
         use_confirmation_modulation=risk.get('use_confirmation_modulation', USE_CONFIRMATION_MODULATION),
+        use_flexible_sizing=risk.get('use_flexible_sizing', USE_FLEXIBLE_SIZING),
+        flexible_sizing_method=risk.get('flexible_sizing_method', FLEXIBLE_SIZING_METHOD),
+        flexible_sizing_target_rr=risk.get('flexible_sizing_target_rr', FLEXIBLE_SIZING_TARGET_RR),
         
         # Regime detection
         use_regime_detection=regime.get('use_regime_detection', False),
@@ -177,8 +181,12 @@ def save_config_to_yaml(config: StrategyConfig, yaml_path: Union[str, Path]):
             'risk_reward': config.risk_reward,
             'position_size_pct': config.position_size_pct,
             'max_positions': config.max_positions,
+            'max_positions_per_instrument': config.max_positions_per_instrument,
             'use_confidence_sizing': config.use_confidence_sizing,
             'confidence_size_multiplier': config.confidence_size_multiplier,
+            'use_flexible_sizing': config.use_flexible_sizing,
+            'flexible_sizing_method': config.flexible_sizing_method,
+            'flexible_sizing_target_rr': config.flexible_sizing_target_rr,
         },
         
         'signals': {

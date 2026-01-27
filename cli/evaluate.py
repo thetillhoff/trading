@@ -297,12 +297,19 @@ Examples:
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     # Determine output directory based on config
-    if config_based_execution:
-        # Use config-based path structure
-        output_dir = Path("results") / "sample_evaluations" / config.name
+    if config_based_execution and args.config:
+        # Mirror config path under results: configs/baseline.yaml -> results/baseline/,
+        # configs/abc/def.yaml -> results/abc/def/
+        config_path = Path(args.config)
+        try:
+            rel = config_path.relative_to("configs")
+            output_subdir = rel.parent / rel.stem
+        except ValueError:
+            output_subdir = Path(config.name)
+        output_dir = Path("results") / output_subdir
     else:
-        # Use instrument-based path
-        output_dir = Path("results") / "sample_evaluations" / args.instrument
+        # Use instrument-based path (no config file or legacy flow)
+        output_dir = Path("results") / args.instrument
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Create reporter

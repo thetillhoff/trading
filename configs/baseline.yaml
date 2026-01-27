@@ -1,5 +1,5 @@
 name: baseline
-description: Elliott Wave + RSI + EMA + MACD - Optimized strategy (+132.08% alpha with position 0.3 and risk_reward 2.5, +45.75% in full 20yr period baseline)
+description: Elliott Wave + RSI + EMA + MACD - Best config (RSI 5, position 0.35, risk_reward 2.5; +165.13% alpha under full-period DJIA)
 
 indicators:
   elliott_wave:
@@ -8,7 +8,7 @@ indicators:
     min_wave_size: 0.02
   rsi:
     enabled: true
-    period: 7
+    period: 5
     oversold: 25
     overbought: 75
   ema:
@@ -23,7 +23,7 @@ indicators:
 
 risk:
   risk_reward: 2.5
-  position_size_pct: 0.3
+  position_size_pct: 0.35
   max_positions: 10
   use_confidence_sizing: true
   confidence_size_multiplier: 0.15

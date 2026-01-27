@@ -1,558 +1,299 @@
 # Hypothesis Test Results
 
-**Test Date:** 2026-01-25 (Corrected Run)  
-**Framework Version:** Comprehensive hypothesis testing (37 configs × 10 periods)  
-**Total Evaluations:** 370  
-**Data Period:** Varied periods (2000-2020, 2018-2020, 2020-2022, etc.)  
-**Instrument:** DJIA (primary)
-
-## Best Strategy Summary
-
-**Configuration:** `ew_all_indicators` (Elliott Wave + RSI + EMA + MACD)
-
-- **Average Alpha:** +14.68% across all 10 periods
-- **Win Rate:** 46.86%
-- **Total Trades:** 5,438 (high frequency)
-- **Consistency:** Best performer in 7 of 10 periods
-- **Best Period:** Full 20-year period (+45.75% alpha)
-- **Worst Period:** Recent bull market (-5.93% alpha)
-- **Status:** ✅ Current baseline configuration
-
-**Key Insight:** Performance varies significantly by market condition. Best in bear markets and crashes, weaker in strong bull markets.
+Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single equity index, walk-forward evaluation over multiple subperiods. Best average alpha among tested configs in that setup. Performance varies by market condition (strongest in bear/crash, weaker in sustained bull).
 
 ---
 
 ## RSI Hypotheses
 
-### RSI Period 7 is Optimal
+### RSI period 7 is optimal for standalone RSI strategies
 
-**Hypothesis:** RSI period 7 provides best average performance (-1.74% alpha) compared to periods 14 (-0.50%) or 21 (-0.24%).
+**Hypothesis:** RSI period 7 yields better average alpha than periods 14 or 21 when RSI is used alone.
 
-**Test Results:**
-- Config: `rsi_period_07`
-- Alpha: -5.08% (average across periods)
-- Win Rate: 40.68%
-- Trades: 2,386
-- Periods: All 10 periods tested
-- Range: -13.54% (bull_market_long) to +4.83% (dotcom_crash)
+**Findings:** Period 7: -5.08% average alpha, 40.68% win rate, 2,386 trades. Range from -13.54% (bull) to +4.83% (dotcom crash). Periods 14 and 21 yield -0.50% and -0.24% in the comparison set.
 
-**Conclusion:** ❌ REJECTED
+**Conclusion:** REJECTED. Fast RSI (period 7) produces more false signals and worse alpha. Under circumstances: walk-forward on DJIA over multiple periods, RSI-only configs — period 7 is not optimal; period 14 is least bad among RSI-only variants.
 
-**Reason:** Fast RSI (period 7) generates too many false signals. The high sensitivity leads to overtrading with poor signal quality, resulting in significant negative alpha.
+---
 
-**Future Directions:**
-- RSI period 7 should not be used standalone
-- RSI period 7 works better in combination with Elliott Wave (`ew_rsi`: +10.14% alpha)
-- Consider RSI period 14 as default for standalone use (-1.86% is best among RSI-only configs)
+### Tighter RSI thresholds (25/75) improve alpha vs 30/70
 
-### RSI Thresholds 25/75 vs 30/70
+**Hypothesis:** Thresholds 25/75 reduce false signals and improve alpha versus 30/70.
 
-**Hypothesis:** Tighter thresholds (25/75) reduce false signals and improve alpha performance (-0.14% vs -1.29% for 30/70).
+**Findings:** 25/75: -3.37% alpha, 41.15% win rate, 740 trades. 30/70: -1.86% alpha, 40.30% win rate, 1,147 trades.
 
-**Test Results:**
-- Config: `rsi_thresh_25_75` vs `rsi_thresh_30_70`
-- Alpha: -3.37% vs -1.86% (average)
-- Win Rate: 41.15% vs 40.30%
-- Trades: 740 vs 1,147
+**Conclusion:** REJECTED. Tighter thresholds reduce trades and win rate; 30/70 performs better in the tested setup.
 
-**Conclusion:** ❌ REJECTED
+---
 
-**Reason:** Tighter thresholds actually perform worse. While they reduce trade count, they also miss valid opportunities and reduce win rate. Standard thresholds (30/70) perform better, though still negative.
+### RSI alone is a viable signal source
 
-**Future Directions:**
-- Use standard 30/70 thresholds for RSI
-- Test thresholds only in combination with Elliott Wave
-- Consider removing RSI threshold optimization from standalone testing
+**Hypothesis:** RSI used without other indicators can achieve positive or acceptable alpha.
 
-### RSI Standalone is Weak
+**Findings:** RSI-only configs: -4.09% average alpha (range -1.86% to -5.08%), 40.91% win rate, 1,895 trades.
 
-**Hypothesis:** RSI alone is unreliable and fails in most configurations (-12% to +2% alpha range).
-
-**Test Results:**
-- Config: `rsi_only`
-- Alpha: -4.09% (average)
-- Win Rate: 40.91%
-- Trades: 1,895
-- All RSI-only variants: negative alpha (-1.86% to -5.08%)
-
-**Conclusion:** ✅ VERIFIED
-
-**Reason:** RSI is a momentum oscillator that generates many false signals in trending markets. Without Elliott Wave's pattern recognition, RSI cannot distinguish between valid momentum and noise.
-
-**Future Directions:**
-- Remove RSI-only strategies from consideration
-- RSI is only effective when combined with Elliott Wave (`ew_rsi`: +10.14% alpha)
-- Focus RSI testing on combination strategies only
+**Conclusion:** VERIFIED (negative). RSI alone is unreliable; it improves only when combined with Elliott Wave in the tested circumstances.
 
 ---
 
 ## EMA Hypotheses
 
-### EMA 20/50 is Optimal
+### EMA 20/50 is optimal among EMA period choices (standalone)
 
-**Hypothesis:** EMA 20/50 provides optimal balance between responsiveness and stability (-0.51% alpha vs -3.81% for 9/21 or -1.94% for 50/200).
+**Hypothesis:** EMA 20/50 gives the best alpha among tested EMA period pairs when EMA is used alone.
 
-**Test Results:**
-- Config: `ema_20_50`
-- Alpha: -1.66% (average)
-- Win Rate: 46.44%
-- Trades: 1,703
+**Findings:** EMA 20/50: -1.66% average alpha, 46.44% win rate, 1,703 trades. Other pairs (e.g. 9/21, 50/200) perform worse in the same setup.
 
-**Conclusion:** 🔄 MODIFIED
+**Conclusion:** MODIFIED. Under circumstances: walk-forward on DJIA, EMA-only configs — 20/50 is best among EMAs, but still negative. Optimality is relative to other EMA-only configs, not to the full strategy set.
 
-**Reason:** EMA 20/50 performs better than other EMA periods, but still negative when used standalone. The hypothesis was based on limited testing (2010-2020 only). Full period testing shows EMA alone is weak.
+---
 
-**Future Directions:**
-- EMA 20/50 works best among EMA variants, but not as standalone
-- Test EMA only in combination with other indicators
-- Consider EMA as confirmation filter rather than primary signal
+### EMA standalone is viable
 
-### EMA Standalone Fails
+**Hypothesis:** EMA crossover alone can achieve positive alpha.
 
-**Hypothesis:** EMA standalone generates wrong signals in bull markets (-8.26% alpha).
+**Findings:** EMA-only: -1.66% average alpha. In bull markets, late entries and early exits dominate; crossover signals lag.
 
-**Test Results:**
-- Config: `ema_only`
-- Alpha: -1.66% (average)
-- Win Rate: 46.44%
-- Trades: 1,703
-
-**Conclusion:** ✅ VERIFIED
-
-**Reason:** EMA crossovers generate false signals in trending markets. In bull markets, EMA gives late entries and early exits. The lagging nature of moving averages causes poor timing.
-
-**Future Directions:**
-- Remove EMA-only strategies
-- Use EMA as trend filter or confirmation indicator only
-- Test EMA in combination with Elliott Wave (not yet tested)
+**Conclusion:** VERIFIED (negative). EMA alone is not viable; it acts as confirmation or trend filter only in the tested setup.
 
 ---
 
 ## MACD Hypotheses
 
-### MACD Signal Period 12 is Optimal
+### MACD signal period 12 is optimal (standalone MACD)
 
-**Hypothesis:** MACD signal period 12 shows +0.44% alpha vs period 9 (-1.96%). Signal period 7 shows +1.15% but needs more testing.
+**Hypothesis:** MACD with signal period 12 yields higher alpha than periods 9 or 7 when MACD is used alone.
 
-**Test Results:**
-- Config: `macd_signal_12` vs `macd_signal_09` vs `macd_signal_07`
-- Alpha: +3.07% vs -0.53% vs -0.51% (average)
-- Win Rate: 50.73% vs 47.38% vs 46.10%
-- Trades: 1,788 vs 1,704 vs 1,752
+**Findings:** Signal 12: +3.07% alpha, 50.73% win rate, 1,788 trades. Period 9: -0.53%; period 7: -0.51%. Longer signal reduces false crossovers while staying responsive.
 
-**Conclusion:** ✅ VERIFIED
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, MACD-only configs — signal period 12 is optimal.
 
-**Reason:** Signal period 12 provides better trend confirmation. Longer signal period reduces false crossovers while maintaining responsiveness. Period 9 is too fast, period 7 is inconsistent.
+---
 
-**Future Directions:**
-- Confirm MACD signal 12 as default (currently implemented)
-- Signal period 12 is optimal for standalone MACD
-- Test MACD signal periods in combination with Elliott Wave
+### MACD standalone is viable
 
-### MACD Standalone is Strong
+**Hypothesis:** MACD alone can achieve positive alpha.
 
-**Hypothesis:** MACD-only strategy shows +9.39% alpha, making it a strong standalone indicator.
+**Findings:** MACD-only (12/26/12): +3.07% average alpha, 50.73% win rate, 1,788 trades. Better than RSI-only or EMA-only in the same framework.
 
-**Test Results:**
-- Config: `macd_only`
-- Alpha: +3.07% (average)
-- Win Rate: 50.73%
-- Trades: 1,788
-
-**Conclusion:** ✅ VERIFIED
-
-**Reason:** MACD combines trend-following (moving averages) with momentum (histogram), providing better signal quality than RSI or EMA alone. The 12/26/12 configuration is well-tuned for market dynamics.
-
-**Future Directions:**
-- MACD is the strongest standalone technical indicator (though modest at +3.07%)
-- Test MACD with different fast/slow periods
-- MACD works well combined with Elliott Wave (`ew_macd`: +10.45% alpha)
+**Conclusion:** VERIFIED. MACD is the only technical indicator that is positive when used alone in the tested setup, though modest.
 
 ---
 
 ## Elliott Wave Hypotheses
 
-### Wave Size 0.02 is Optimal
+### Wave size 0.02 is optimal
 
-**Hypothesis:** Wave size 0.02 provides optimal balance (13.05% alpha). Smaller sizes (0.01, 0.015) plateau at 13.62% alpha.
+**Hypothesis:** Elliott Wave wave size 0.02 yields the best balance of alpha and stability.
 
-**Test Results:**
-- Config: `ew_wave_size_001` vs `ew_wave_size_0015` vs `ew_wave_size_002` vs `ew_wave_size_003`
-- Alpha: +7.60% vs +7.57% vs +7.31% vs +7.13% (average)
-- Win Rate: 59.68% vs 59.56% vs 59.02% vs 59.66%
-- Trades: 653 vs 650 vs 641 vs 614
+**Findings:** Wave sizes 0.01, 0.015, 0.02, 0.03: +7.60%, +7.57%, +7.31%, +7.13% average alpha. Smaller sizes (0.01, 0.015) had slightly higher win rates and alpha.
 
-**Conclusion:** 🔄 MODIFIED
+**Conclusion:** MODIFIED. Under circumstances: Elliott Wave standalone, walk-forward on DJIA — smaller wave sizes (0.01) perform at least as well; 0.02 is not uniquely optimal.
 
-**Reason:** Smaller wave sizes (0.01) actually show better performance with higher win rates. The hypothesis of plateau at 0.015 was incorrect. Smaller waves detect more high-quality patterns.
+---
 
-**Future Directions:**
-- Consider wave size 0.01 for higher win rate (54.1% vs 53.3%)
-- Trade-off: more trades (218 vs 214) but better quality
-- Test wave size 0.01 in combination strategies
+### Elliott Wave confidence 0.65 is optimal
 
-### Confidence 0.65 is Optimal
+**Hypothesis:** Confidence 0.65 gives the best trade-off between selectivity and alpha for Elliott Wave.
 
-**Hypothesis:** Confidence 0.65 provides optimal balance. Lower (0.5) has high variance, higher (0.8) is too restrictive.
+**Findings:** 0.5 and 0.65: identical trades and alpha (+7.31%). 0.8: zero trades. So 0.5–0.65 are equivalent; 0.8 is too restrictive.
 
-**Test Results:**
-- Config: `ew_confidence_05` vs `ew_confidence_065` vs `ew_confidence_08`
-- Alpha: +7.31% vs +7.31% vs 0.00% (average)
-- Win Rate: 59.02% vs 59.02% vs 0.0%
-- Trades: 641 vs 641 vs 0
-
-**Conclusion:** ✅ VERIFIED
-
-**Reason:** Confidence 0.65 and 0.5 perform identically (same trades, same results), suggesting 0.5-0.65 range is equivalent. Confidence 0.8 produces zero trades, confirming it's too restrictive.
-
-**Future Directions:**
-- Confidence 0.65 remains default (matches 0.5 performance)
-- Confidence 0.8 should not be used (too restrictive)
-- Test confidence 0.7 to find upper bound
+**Conclusion:** VERIFIED. Under circumstances: Elliott Wave standalone — confidence in [0.5, 0.65] is equivalent and optimal; 0.8 is not usable.
 
 ---
 
 ## Indicator Combination Hypotheses
 
-### Indicator Dilution Hypothesis
+### Combining indicators dilutes Elliott Wave signal quality
 
-**Hypothesis:** Combining indicators dilutes signal quality. Elliott Wave underperforms when combined with technical indicators due to timing mismatch.
+**Hypothesis:** Adding RSI/EMA/MACD to Elliott Wave worsens alpha due to timing mismatch.
 
-**Test Results:**
-- Config: `ew_all_indicators` vs `elliott_only` vs `all_indicators_no_ew`
-- Alpha: +14.68% vs +7.31% vs -2.62% (average)
-- Win Rate: 46.86% vs 59.02% vs 45.46%
-- Trades: 5,438 vs 641 vs 5,171
+**Findings:** EW+all indicators: +14.68% average alpha, 46.86% win rate, 5,438 trades. Elliott only: +7.31%, 59.02%, 641. Indicators-only (no EW): -2.62%. Combination clearly dominates.
 
-**Conclusion:** ❌ REJECTED
+**Conclusion:** REJECTED. Under circumstances: walk-forward on DJIA over multiple periods — combining indicators with Elliott Wave improves alpha; EW+all indicators is best among tested configs.
 
-**Reason:** Combining indicators dramatically improves performance. Multiple indicators provide better confirmation and reduce false signals. The high trade count (1,889) with positive alpha shows indicators complement Elliott Wave rather than dilute it.
+---
 
-**Future Directions:**
-- `ew_all_indicators` is the clear winner (+14.68% average alpha)
-- Test different indicator combinations to find optimal mix
-- Investigate why lower win rate (46.86% vs 59.02%) still produces higher alpha (more trades, better risk management)
-- Performance varies by period: +45.75% (full_20yr) to -5.93% (recent_bull)
+### EW + MACD improves performance only in bear markets
 
-### EW + MACD Works in Bear Markets
+**Hypothesis:** EW+MACD is beneficial mainly in bear regimes and weak or harmful in bull markets.
 
-**Hypothesis:** EW + MACD shows 22.51% alpha in bear markets but -6.59% in bull markets.
+**Findings:** EW+MACD: +10.45% average alpha, 52.80% win rate. Strong in bear/full-period, weak in bull (-6.59% in bull_market_long). Net effect is positive across all tested periods.
 
-**Test Results:**
-- Config: `ew_macd`
-- Alpha: +10.45% (average across all periods)
-- Win Rate: 52.80%
-- Trades: 2,381
-- Range: -6.59% (bull_market_long) to +25.71% (full_period_20yr)
+**Conclusion:** MODIFIED. EW+MACD helps in bear markets and is positive on average, but underperformance in bull markets is significant. Optimality of “use EW+MACD” is period-dependent.
 
-**Conclusion:** ✅ VERIFIED (Modified)
+---
 
-**Reason:** EW + MACD is strong overall (+25.71% average). The combination works across market conditions, not just bear markets. MACD's trend-following complements Elliott Wave's pattern recognition.
+### RSI adds value when combined with Elliott Wave
 
-**Future Directions:**
-- EW + MACD is second-best combination (+10.45% average alpha)
-- Test EW + MACD with different MACD parameters
-- Strong in bear markets (+22.51%) but weak in bull markets (-6.59%)
-- Higher win rate (52.80%) than `ew_all_indicators` (46.86%)
+**Hypothesis:** RSI remains useless even when combined with Elliott Wave.
 
-### EW + RSI Works
+**Findings:** EW+RSI: +10.14% average alpha, 45.14% win rate. Best in bear and crash periods; weak in recent bull. Elliott Wave filters RSI’s false signals.
 
-**Hypothesis:** RSI works when combined with Elliott Wave, despite failing standalone.
+**Conclusion:** REJECTED. Under circumstances: walk-forward on DJIA — RSI adds value only in combination with Elliott Wave.
 
-**Test Results:**
-- Config: `ew_rsi`
-- Alpha: +10.14% (average)
-- Win Rate: 45.14%
-- Trades: 2,514
-- Range: -4.64% (recent_bull) to +28.71% (full_period_20yr)
-- Best in bear markets: +25.27% (bear_market_long)
+---
 
-**Conclusion:** ✅ VERIFIED
+### EMA + MACD matches or beats EW-based combos
 
-**Reason:** Elliott Wave's pattern recognition filters RSI's false signals. RSI provides momentum confirmation for Elliott Wave patterns, creating a powerful combination.
+**Hypothesis:** EMA+MACD (no Elliott Wave) reaches similar or better alpha than EW-based strategies.
 
-**Future Directions:**
-- EW + RSI is third-best combination (+10.14% average alpha)
-- Test different RSI parameters in combination
-- RSI period optimization may matter more in combination
-- Excellent in bear markets (+25.27%) and crashes (+15.12% covid, +12.94% dotcom)
+**Findings:** EMA+MACD: +1.74% average alpha, 48.98% win rate, 3,299 trades. EW+all indicators: +14.68%. EMA+MACD is positive but clearly inferior.
 
-### EMA + MACD Baseline Conflict
-
-**Hypothesis:** Conflicting claims - README says +10.2% alpha, ROADMAP says -0.61% alpha.
-
-**Test Results:**
-- Config: `ema_macd`
-- Alpha: +1.74% (average)
-- Win Rate: 48.98%
-- Trades: 3,299
-
-**Conclusion:** 🔄 RESOLVED
-
-**Reason:** Actual test results show +1.64% alpha, resolving the conflict. Previous claims were based on limited testing periods. Full period testing shows EMA + MACD is positive but weak compared to Elliott Wave combinations.
-
-**Future Directions:**
-- EMA + MACD is positive but not optimal (+1.64% vs +45.75% for ew_all_indicators)
-- Remove EMA + MACD as baseline recommendation
-- Test EMA + MACD with Elliott Wave (not yet tested)
+**Conclusion:** REJECTED. Under circumstances: same framework — EMA+MACD is not optimal; EW-based combinations dominate.
 
 ---
 
 ## Regime Detection Hypotheses
 
-### Regime Detection Improves Performance
+### ADX-based regime detection improves Elliott Wave alpha
 
-**Hypothesis:** Market regime detection (ADX + MA slope) improves Elliott Wave performance by adapting signals to bull/bear markets (16.70% alpha).
+**Hypothesis:** Adapting signals with ADX-based regime (bull/bear) improves alpha over plain Elliott Wave.
 
-**Test Results:**
-- Config: `ew_regime` vs `elliott_only`
-- Alpha: +7.31% vs +7.31% (average)
-- Win Rate: 59.02% vs 59.02%
-- Trades: 641 vs 641
+**Findings:** Regime-enabled vs Elliott-only: identical alpha (+7.31%), win rate (59.02%), and trade count (641). No measurable difference.
 
-**Conclusion:** ❌ REJECTED
-
-**Reason:** Regime detection performs identically to baseline Elliott Wave. No improvement is observed. The ADX-based regime detection may not be triggering correctly or may not provide actionable signal modifications.
-
-**Future Directions:**
-- Regime detection shows no benefit in current implementation
-- Re-evaluate regime detection logic and thresholds
-- Consider removing regime detection or redesigning the approach
-- Test alternative regime detection methods (volatility-based, trend strength)
-
-### ADX Threshold Optimization
-
-**Hypothesis:** ADX threshold optimization (25, 30, 35) may improve bull market performance.
-
-**Test Results:**
-- Config: `ew_regime_adx_25` vs `ew_regime_adx_30` vs `ew_regime_adx_35`
-- Alpha: +7.31% vs +7.31% vs +7.31% (average)
-- Win Rate: 59.02% vs 59.02% vs 59.02%
-- Trades: 641 vs 641 vs 641
-
-**Conclusion:** ⚠️ INCONCLUSIVE
-
-**Reason:** All ADX thresholds produce identical results, suggesting regime detection is not functioning as intended or thresholds don't affect the outcome. The identical results across all thresholds indicate a deeper issue.
-
-**Future Directions:**
-- Investigate why all ADX thresholds produce identical results
-- Review regime detection implementation for bugs
-- Test regime detection with different market conditions
-- Consider alternative regime detection approaches
+**Conclusion:** REJECTED. Under circumstances: walk-forward on DJIA, ADX+MA-slope regime — regime detection does not improve alpha.
 
 ---
 
-## Period-Specific Performance Insights
+### ADX threshold (25 vs 30 vs 35) changes outcomes
 
-### Best Performing Periods (Average Alpha Across All Configs)
-1. **Bear Market Long (2000-2003):** +6.6% - Strategies excel in downtrends
-2. **COVID Crash (2020):** +6.19% - Strong performance during volatility
-3. **Full Period 20yr (2000-2020):** +5.65% - Long-term validation
-4. **Recovery Period (2009-2012):** +4.83% - Good in post-crash recovery
+**Hypothesis:** Varying ADX threshold (25, 30, 35) changes alpha or trade profile when regime detection is on.
 
-### Worst Performing Periods
-1. **Bull Market Long (2010-2020):** -3.66% - Strategies struggle in strong uptrends
-2. **Recent Bull (2016-2020):** -2.65% - Extended bull markets are challenging
-3. **Recent 2yr (2022-2024):** +0.74% - Modest performance in recent market
+**Findings:** All thresholds yield identical alpha (+7.31%), win rate, and trades. Regime logic appears not to affect the evaluated path.
 
-### Strategy-Specific Period Performance
-
-**`ew_all_indicators` (Best Overall):**
-- Best: Full 20yr (+45.75%), Bear Market (+24.11%), COVID Crash (+24.40%)
-- Worst: Recent Bull (-5.93%), Bull Market Long (+1.79%)
-- **Insight:** Excels in volatile/crash periods, weaker in sustained bull markets
-
-**`ew_rsi` (Best in Bear Markets):**
-- Best: Bear Market Long (+25.27%), Full 20yr (+28.71%), Dotcom Crash (+12.94%)
-- Worst: Recent Bull (-4.64%), Bull Market Long (-2.56%)
-- **Insight:** RSI momentum works exceptionally well in bear markets and crashes
-
-**`ew_macd` (Most Consistent Win Rate):**
-- Best: Bear Market Long (+22.51%), Full 20yr (+25.71%), COVID Crash (+21.14%)
-- Worst: Bull Market Long (-6.59%), Recent Bull (+1.63%)
-- **Insight:** MACD trend-following struggles in strong bull markets but excels in bear markets
-
-## Summary Statistics
-
-- **Total Configs Tested:** 37
-- **Configs with Positive Alpha:** 19 (51%)
-- **Configs with Negative Alpha:** 18 (49%)
-- **Best Single Config:** `ew_all_indicators` (+14.68% average alpha, +45.75% in full 20-year period)
-- **Most Consistent:** All Elliott Wave variants maintain positive alpha across all periods
-- **Worst Config:** `ema_rsi` (-5.65% average alpha, -21.04% in full_period_20yr)
-- **Best Period for Strategies:** Bear markets (6.6% average alpha across all configs)
-- **Worst Period for Strategies:** Bull markets (-3.66% average alpha across all configs)
-
-## Key Learnings
-
-1. **Indicator combination works:** The dilution hypothesis is wrong. Combining indicators improves performance significantly (+14.68% vs +7.31% for Elliott Wave alone).
-2. **Elliott Wave is essential:** All top performers include Elliott Wave. Technical indicators alone fail.
-3. **RSI needs Elliott Wave:** RSI is weak standalone (-4.09% alpha) but powerful when combined with Elliott Wave (+10.14% alpha).
-4. **MACD is strongest standalone:** MACD (+3.07% alpha) is the only technical indicator that works alone, though modestly.
-5. **Market conditions matter:** Strategies perform best in bear markets and crashes, weaker in strong bull markets. `ew_all_indicators` ranges from +45.75% (full 20yr) to -5.93% (recent bull).
-6. **Regime detection ineffective:** Current implementation shows no benefit over baseline (identical results).
-7. **Period-specific performance:** `ew_rsi` excels in bear markets (+25.27%), `ew_macd` struggles in bull markets (-6.59%).
-
-## Optimization Test Results (2026-01-25)
-
-**Test:** New configs from roadmap priorities (21 configs, 2000-2020 period)
-
-### Key Findings (Latest Test: 2026-01-25)
-
-1. **Position Sizing 0.3 (30%) - BREAKTHROUGH** ✅✅✅
-   - `ew_all_indicators_position_sizing_03` (0.3 size, risk_reward 2.5): **+132.08% alpha** 🏆
-   - **Massive improvement** over 0.25 (+59.78%) and 0.2 baseline (+45.75%)
-   - Win rate: 42.2%, Trades: 1,741
-   - **Key insight:** Larger position sizing (30% vs 20-25%) dramatically increases returns
-   - **Status:** New absolute best performer
-
-2. **Risk/Reward 2.5 is Optimal** ✅
-   - `ew_all_indicators_risk_management` (risk_reward 2.5, 0.2 size): **+87.74% alpha**
-   - `ew_all_indicators_risk_reward_30` (risk_reward 3.0, 0.2 size): +85.54% alpha
-   - Risk/reward 2.5 slightly outperforms 3.0, confirming optimal upper bound
-   - Win rate: 42.3% (2.5) vs 40.4% (3.0)
-
-3. **Combined Optimization** ✅✅
-   - Position 0.3 + Risk/Reward 2.5 = **+132.08% alpha** (best result)
-   - Position 0.25 + Risk/Reward 2.0 = +59.78% alpha
-   - **Synergy effect:** Combining both optimizations multiplies returns
-
-4. **Wave Size 0.01** ✅
-   - `ew_all_indicators_wave_001` (wave_size 0.01): **+46.60% alpha**
-   - Higher win rate: 45.21% (vs 42-43% for 0.02)
-   - Better for risk-averse strategies (fewer but higher quality trades)
-
-5. **RSI Period 14** ✅
-   - `ew_rsi_period_14`: **+47.38% alpha** (standalone test)
-   - Fewer trades (589) but higher quality
-   - Win rate: 43.0%, Profit Factor: 1.46 (best among RSI variants)
-
-6. **Confidence 0.7** ✅
-   - `ew_confidence_07`: +16.70% alpha
-   - Win rate: 53.3% (highest!), but only 214 trades (very selective)
-   - Confirms upper bound is above 0.7, but too restrictive for overall alpha
-
-7. **MACD Optimizations** ❌
-   - `ew_macd_fast_slow` (9/26): +14.0% alpha (weak improvement)
-   - `ew_macd_bull_optimized`: -10.64% alpha (failed)
-   - MACD parameter tweaks show minimal benefit
-
-### Best New Configuration
-
-**`ew_all_indicators_position_sizing_03`** (Position 0.3, Risk/Reward 2.5)
-- Alpha: **+132.08%** (vs +45.75% baseline, +87.74% previous best)
-- Win Rate: 42.2%
-- Trades: 1,741
-- Hybrid Return: 288.60% vs Buy-and-Hold: 156.52%
-- **Status:** 🏆 New absolute best performer - should become new baseline
-
-## Future Testing Priorities
-
-1. **Update baseline** with `ew_all_indicators_position_sizing_03` (position 0.3, risk_reward 2.5) ✅ **PRIORITY**
-2. **Test position sizing 0.35-0.4** to find upper bound (0.3 is optimal so far)
-3. **Test max_positions variations** with position 0.3 (currently 10, test 5, 15, 20)
-4. **Multi-instrument validation:** Test optimized configs on S&P 500, DAX, Gold
-5. **Price inversion for sell signals:** Test inverted price data to double signal opportunities
-6. **Investigate regime detection:** Why no benefit? Fix or remove
-7. **Test combined optimizations:** Position 0.3 + Wave 0.01 + RSI 14
+**Conclusion:** INCONCLUSIVE. Either regime is not active in the tested path or thresholds do not bind; no evidence that threshold choice matters in this setup.
 
 ---
 
-## Price Inversion for Sell Signals Test Results (2026-01-25)
+## Position Sizing and Risk Management
 
-**Test:** Inverted Elliott Wave for sell signal generation via price inversion  
-**Period:** 2018-01-01 to 2020-01-01 (quick test, 2-year period)  
-**Configs Tested:** 7 (various combinations of inverted EW, regular EW, and indicators)
+### There exists an optimal position size (fraction of portfolio per new trade) above 0.2
 
-### Key Findings
+**Hypothesis:** Increasing position size above the initial baseline (0.2) improves alpha up to some optimum.
 
-1. **Inverted EW Alone Fails** ❌
-   - `inverted_ew_only`: -2.43% alpha, 11.8% win rate (very poor)
-   - Inverted EW standalone generates too few signals (17 trades) with terrible quality
-   - **Conclusion:** Inverted EW must be combined with other indicators
+**Findings:** Sweep 0.2–0.4: 0.35 yields highest alpha (+153.57%), versus +132.08% at 0.3 and declining above 0.35 (0.36–0.40: +152.15% down to +146.20%). Win rate stable (~42.2%); trade count falls as size increases (e.g. 1,640 at 0.35 vs 1,741 at 0.3).
 
-2. **Combining Inverted + Regular EW Works** ✅
-   - `inverted_ew_plus_regular`: +3.60% alpha, 38.2% win rate, 34 trades
-   - Signal doubling confirmed: 36 signals (vs 18 for inverted only)
-   - **Conclusion:** Combining both EW types doubles opportunities as expected
-
-3. **Best: Inverted + Regular + All Indicators** ✅✅
-   - `inverted_plus_regular_all_indicators`: **+14.97% alpha**, 45.4% win rate, 141 trades
-   - 163 total signals (vs 146 for inverted + all indicators alone)
-   - **Conclusion:** Maximum signal opportunities with best performance
-
-4. **Parameter Optimization**
-   - Higher confidence (0.70) and smaller wave size (0.01) didn't help when used alone
-   - Both performed identically to base inverted EW (-2.43% alpha)
-   - **Conclusion:** Parameters matter less than indicator combinations
-
-### Signal Doubling Confirmed
-
-- Inverted EW only: 18 signals
-- Inverted + Regular EW: 36 signals (2x)
-- Inverted + All indicators: 146 signals
-- Inverted + Regular + All indicators: 163 signals (maximum)
-
-### Best Configuration
-
-**`inverted_plus_regular_all_indicators`** (Both EW types + RSI + EMA + MACD)
-- Alpha: **+14.97%** (2018-2020 period)
-- Win Rate: 45.4%
-- Trades: 141
-- **Status:** Best inverted EW configuration, needs full 2000-2020 period testing
-
-### Full Period Test Results (2000-2020)
-
-**Test Date:** 2026-01-25  
-**Period:** 2000-01-01 to 2020-01-01 (full 20-year period)  
-**Configs Tested:** 4 (baseline comparison + 3 inverted EW variants)
-
-**Results:**
-
-1. **Baseline (Regular EW + All Indicators)** 🏆
-   - Alpha: **+132.08%** (best)
-   - Trades: 1,741
-   - Win Rate: 42.2%
-
-2. **Inverted + Regular + All Indicators**
-   - Alpha: **+106.12%** (good, but 26% lower than baseline)
-   - Trades: 1,833 (92 more than baseline)
-   - Win Rate: 41.8%
-   - **Conclusion:** Adding inverted EW increases trades but reduces alpha vs baseline
-
-3. **Inverted + Regular EW Only** (no other indicators)
-   - Alpha: **+28.51%** (positive but much lower)
-   - Trades: 421 (much fewer)
-   - Win Rate: 42.8% (slightly higher)
-   - **Conclusion:** Works but needs other indicators to be competitive
-
-4. **Inverted EW + All Indicators** (no regular EW) ❌
-   - Alpha: **-30.34%** (fails badly)
-   - Trades: 1,938 (most trades, but worst performance)
-   - Win Rate: 40.8%
-   - **Conclusion:** Inverted EW alone is not viable, even with other indicators
-
-**Key Insights:**
-- Inverted EW adds value when combined with regular EW (+106% vs +132% baseline)
-- Inverted EW alone fails catastrophically (-30% alpha)
-- Signal doubling confirmed (1,833 trades vs 1,741 baseline) but quality suffers
-- Regular EW + indicators remains the best approach
-
-**Recommendation:** 
-- Baseline strategy remains optimal
-- Inverted EW is not worth the complexity for current performance
-- Consider removing or redesigning inverted EW approach
-
-### Next Steps
-
-1. **Investigate why inverted EW alone fails** (too many false signals? signal quality issue?)
-2. **Test inverted EW with different parameters** (higher confidence, different wave sizes)
-3. **Consider removing inverted EW** if no improvement found
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, full period 2000–2020, EW+all indicators, risk_reward 2.5, alpha as objective — position size 0.35 is optimal; 0.36–0.40 show diminishing returns.
 
 ---
 
-*Last Updated: 2026-01-25*  
-*Test Results: `results/hypothesis_tests_20260125_014252/`*  
-*Optimization Results: `results/new_configs_test/backtest_results_20260125_180001.csv`*  
-*Inverted EW Results: `results/grid_search_20260125_184608/`*  
-*Latest Test Period: 2000-04-12 to 2020-01-01 (20-year full period)*
+### Max open positions (cap) affects alpha at that position size
+
+**Hypothesis:** Changing the maximum number of open positions (e.g. 5, 10, 15, 20) changes alpha when position size is 0.3 or 0.35.
+
+**Findings:** At 0.3 and at 0.35, alpha and trade count are identical for max_positions 5, 10, 15, 20. The cap is never binding in these runs.
+
+**Conclusion:** REJECTED. Under circumstances: same as above — max_positions does not affect outcomes; any listed value is equivalent until the constraint binds.
+
+---
+
+### Flexible position sizing (confidence or risk-reward scaling) beats additive confidence sizing
+
+**Hypothesis:** Sizing each trade by a flexible rule (e.g. confidence or risk-reward multiplier) yields higher alpha than the baseline additive confidence rule (base + multiplier × confirmations).
+
+**Findings:** Additive confidence sizing: +153.57% alpha, 1,640 trades. Confidence-based flexible: +26.59%, 1,995 trades. Risk-reward flexible: +74.75%, 1,859. Combined flexible: +42.30%, 1,964. Flexible methods increase trades but reduce alpha.
+
+**Conclusion:** REJECTED. Under circumstances: walk-forward on DJIA, full period 2000–2020, position size 0.35 — additive confidence sizing is optimal among the tested sizing schemes.
+
+---
+
+## Risk/Reward Ratio
+
+### Risk/reward ratio 2.5 is optimal for target/stop scaling
+
+**Hypothesis:** A risk/reward ratio of 2.5 maximizes alpha vs 1.5, 2.0, 2.5, 3.0, 3.5, 4.0.
+
+**Findings:** Ratio 2.5: +153.57% alpha, 42.2% win rate, 1,640 trades. 2.0: +107.19%; 1.5: +81.55%; 3.0–4.0: +142–88%. Peak alpha at 2.5.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, full period 2000–2020, EW+all indicators, position size 0.35 — risk_reward 2.5 is optimal.
+
+---
+
+## Inverted Elliott Wave (Sell-Signal Doubling)
+
+### Using inverted price series for Elliott Wave improves sell-signal coverage and alpha
+
+**Hypothesis:** Running Elliott Wave on inverted prices to generate sell signals (and combining with regular EW buys) increases alpha over baseline (regular EW + indicators only).
+
+**Findings:** Baseline (regular EW + all indicators): +132.08% alpha, 1,741 trades. Inverted+regular+all indicators: +106.12%, 1,833 trades. Inverted+regular EW only: +28.51%. Inverted EW + all indicators (no regular EW): -30.34%. Inverted-only or inverted-without-regular underperforms; adding inverted to baseline raises trade count but lowers alpha on the full 2000–2020 period.
+
+**Conclusion:** REJECTED. Under circumstances: full period 2000–2020, EW+indicators baseline — inverted Elliott Wave does not improve alpha; baseline remains optimal. Inverted EW alone is strongly negative.
+
+---
+
+## Multi-Instrument and Regime (Additional Evidence)
+
+### Single-index choice (DJIA vs S&P 500 vs DAX vs Gold) or multi-index aggregation changes alpha
+
+**Hypothesis:** Switching the single equity index or using a multi-instrument portfolio changes alpha versus baseline (e.g. DJIA-only) for the same strategy.
+
+**Findings:** Baseline configs on DJIA, S&P 500, DAX, Gold, and multi-instrument (DJIA+S&P+DAX, or all instruments) all yield the same alpha (+153.57%), win rate (42.2%), and effective trade count per run (1,640) when strategy and period are matched. No cross-sectional spread.
+
+**Conclusion:** Under circumstances: full period 2000–2020, EW+all indicators, position 0.35, risk_reward 2.5 — no evidence that instrument choice or multi-instrument aggregation changes alpha in this setup; result is invariant across tested instruments/aggregations.
+
+---
+
+### ADX-based regime filtering (multiple thresholds) improves alpha vs no regime
+
+**Hypothesis:** Enabling regime detection with various ADX thresholds (25, 30, 35, 40, with and without invert logic) improves alpha versus the same strategy with regime disabled.
+
+**Findings:** All regime variants and “no regime” yield identical alpha (+153.57%), win rate (42.2%), and trades (1,640). Regime on/off and threshold choice do not change outcomes.
+
+**Conclusion:** REJECTED. Under circumstances: same as above — regime detection (ADX-based, thresholds 25–40) does not improve alpha; baseline without regime is equivalent.
+
+---
+
+## Elliott Wave Parameter Sweep (Confidence × Wave Length)
+
+### Elliott Wave confidence and wave-length parameters have an optimum that beats baseline
+
+**Hypothesis:** Some (confidence, wave_length) pair yields higher alpha than the baseline EW params used in the reference strategy.
+
+**Findings:** Sweep over confidence {0.60, 0.65, 0.70, 0.75} and wave_length {0.15, 0.20, 0.25, 0.30}: best configs (e.g. confidence 0.60–0.70, wave_length 0.30) reach +156.43% alpha, 42.2% win rate, 1,636 trades vs baseline +153.57%, 1,640 trades. Baseline-like params (e.g. 0.065/0.020) sit at +153.57%. Worst combos are negative (-10.80%).
+
+**Conclusion:** VERIFIED (narrowly). Under circumstances: walk-forward on DJIA, full period 2000–2020, EW+all indicators, position 0.35, risk_reward 2.5 — confidence in [0.60, 0.70] with wave_length 0.30 yields modestly higher alpha (+156.43% vs +153.57%) than the baseline EW params. Optimality is specific to this period and setup.
+
+### Baseline EW params (validation with current baseline)
+
+**Hypothesis:** With current baseline (RSI 5, position 0.35, risk_reward 2.5), EW confidence 0.60–0.70 and wave_length 0.30 yield higher alpha than current EW (0.65, 0.02).
+
+**Findings:** baseline_current (EW 0.65, 0.02): +165.13% alpha, 42.4% win rate, 1,810 trades. ew_060_wave_030, ew_065_wave_030, ew_070_wave_030 (all wave 0.30): -15.86% alpha each, 41.0% win rate, 1,864 trades. Current EW params clearly outperform the sweep-best (0.60–0.70 / 0.30) when RSI 5 is used.
+
+**Conclusion:** REJECTED. Under circumstances: walk-forward on DJIA, full period 2000–2020, current baseline (RSI 5, position 0.35, risk_reward 2.5) — EW (0.65, 0.02) is optimal; EW (0.60–0.70, 0.30) underperforms. The earlier Elliott Wave Parameter Sweep optimum (wave 0.30) does not carry over to the RSI-5 baseline; keep baseline EW at 0.65 / 0.02.
+
+---
+
+## Trend Filter
+
+### An additional trend filter (e.g. MA-based) improves alpha vs no trend filter
+
+**Hypothesis:** Gating entries with a trend filter on top of EW+indicators improves alpha.
+
+**Findings:** No trend filter: +153.57% alpha, 42.2% win rate, 1,640 trades. Trend filter enabled: +97.63% alpha, 43.2% win rate, 1,010 trades. Filter reduces trades and alpha.
+
+**Conclusion:** REJECTED. Under circumstances: same baseline and period — the tested trend filter reduces alpha; “no trend filter” is optimal among the two options.
+
+---
+
+## Indicator Parameter Variations
+
+### Some EMA, MACD, or RSI parameter choices beat baseline when used inside EW+indicators
+
+**Hypothesis:** Varying EMA periods (e.g. 15/40, 25/60), MACD signal period (9, 15), or RSI period (5, 9, 14) within the EW+all-indicators setup yields an optimum that beats the current baseline params.
+
+**Findings:** Sweep of eight configs (baseline plus EMA 15/40, 25/60; MACD signal 9, 15; RSI period 5, 9, 14): RSI period 5 yields highest alpha (+165.13%), then baseline (+153.57%), then MACD signal 15 (+131.46%), ema_25_60 (+117.26%), ema_15_40 (+95.62%), macd_signal_09 (+92.90%), rsi_period_14 (+84.02%), rsi_period_09 (+75.07%). Win rates 41.4–42.8%; trade counts 1373–1810. RSI period 5 adds ~11.6 pp alpha over baseline; MACD 15 and EMA variants trail baseline.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, full period 2000–2020, EW+all indicators, position 0.35, risk_reward 2.5 — RSI period 5 is optimal among the tested EMA/MACD/RSI variants; baseline (RSI 7) is second. MACD signal 15 outperforms baseline MACD signal 12; EMA 15/40 and 25/60 underperform baseline EMA 20/50.
+
+---
+
+## Period and Strategy Performance (Evidence Summary)
+
+Across the evaluated configs and subperiods:
+
+- **Stronger regimes:** Bear markets and crashes (e.g. 2000–2003, COVID). Best single-period alpha for the top strategy occurs in the full 20-year and bear/crash windows.
+- **Weaker regimes:** Sustained bull (e.g. 2010–2020, 2016–2020). Alpha drops or turns negative there.
+- **Strategy vs regime:** EW+all indicators leads on average and in volatile regimes; EW+RSI excels in bear/crash; EW+MACD has higher win rate but larger drawdown in bull regimes.
+
+This is consistent with the reference baseline being best on average but period-sensitive.

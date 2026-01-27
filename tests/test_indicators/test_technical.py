@@ -1,10 +1,15 @@
 """
-Tests for technical indicators (RSI, EMA, MACD, ADX).
+Tests for technical indicators (RSI, EMA, MACD, ADX) and confirmation helpers.
 """
 import pytest
 import pandas as pd
 import numpy as np
-from core.indicators.technical import TechnicalIndicators
+from core.indicators.technical import (
+    TechnicalIndicators,
+    IndicatorValues,
+    check_buy_confirmation,
+    check_sell_confirmation,
+)
 
 
 @pytest.fixture
@@ -172,7 +177,100 @@ class TestCalculateAll:
         """calculate_all should work with DataFrame input."""
         indicators = TechnicalIndicators()
         df = indicators.calculate_all(sample_ohlcv)
-        
+
         assert len(df) == len(sample_ohlcv)
         assert 'price' in df.columns
         assert 'adx' in df.columns
+
+
+class TestGetIndicatorsAt:
+    """Test get_indicators_at."""
+
+    def test_get_indicators_at_returns_indicator_values(self, sample_prices):
+        """get_indicators_at should return IndicatorValues when data suffices."""
+        indicators = TechnicalIndicators()
+        ts = sample_prices.index[50]
+        vals = indicators.get_indicators_at(sample_prices, ts)
+        assert vals is not None
+        assert isinstance(vals, IndicatorValues)
+        assert vals.timestamp == ts
+        assert vals.price == sample_prices.loc[ts]
+        assert vals.rsi is not None
+
+    def test_get_indicators_at_early_index_returns_none(self, sample_prices):
+        """Early timestamps may have insufficient data for RSI."""
+        indicators = TechnicalIndicators()
+        ts = sample_prices.index[0]
+        vals = indicators.get_indicators_at(sample_prices, ts)
+        # Either None or valid; implementation may return None for first rows
+        assert vals is None or isinstance(vals, IndicatorValues)
+
+
+class TestCheckBuyConfirmation:
+    """Test check_buy_confirmation."""
+
+    def test_none_returns_no_indicator_data(self):
+        """None input returns (False, 'No indicator data', 0)."""
+        ok, reason, count = check_buy_confirmation(None)
+        assert ok is False
+        assert "No indicator data" in reason
+        assert count == 0
+
+    def test_rsi_oversold_confirms_buy(self):
+        """RSI oversold can confirm buy when use_rsi=True."""
+        vals = IndicatorValues(
+            timestamp=pd.Timestamp('2020-01-15'),
+            price=100.0,
+            rsi=30.0,
+            rsi_oversold=True,
+            rsi_overbought=False,
+            ema_short=None,
+            ema_long=None,
+            price_above_ema_short=False,
+            price_above_ema_long=False,
+            ema_bullish_cross=False,
+            ema_bearish_cross=False,
+            macd_line=None,
+            macd_signal=None,
+            macd_histogram=None,
+            macd_bullish=False,
+            macd_bearish=False,
+        )
+        ok, reason, count = check_buy_confirmation(vals, use_rsi=True, use_ema=False, use_macd=False)
+        assert count >= 1
+        assert "RSI" in reason or "favorable" in reason
+
+
+class TestCheckSellConfirmation:
+    """Test check_sell_confirmation."""
+
+    def test_none_returns_no_indicator_data(self):
+        """None input returns (False, 'No indicator data', 0)."""
+        ok, reason, count = check_sell_confirmation(None)
+        assert ok is False
+        assert "No indicator data" in reason
+        assert count == 0
+
+    def test_rsi_overbought_confirms_sell(self):
+        """RSI overbought can confirm sell when use_rsi=True."""
+        vals = IndicatorValues(
+            timestamp=pd.Timestamp('2020-01-15'),
+            price=100.0,
+            rsi=75.0,
+            rsi_oversold=False,
+            rsi_overbought=True,
+            ema_short=None,
+            ema_long=None,
+            price_above_ema_short=False,
+            price_above_ema_long=False,
+            ema_bullish_cross=False,
+            ema_bearish_cross=False,
+            macd_line=None,
+            macd_signal=None,
+            macd_histogram=None,
+            macd_bullish=False,
+            macd_bearish=False,
+        )
+        ok, reason, count = check_sell_confirmation(vals, use_rsi=True, use_ema=False, use_macd=False)
+        assert count >= 1
+        assert "RSI" in reason or "favorable" in reason

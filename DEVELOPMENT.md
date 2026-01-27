@@ -90,3 +90,7 @@ Reporting (core/grid_test/) → Charts + CSV results
 1. Extend `SimulationResult` dataclass in `core/evaluation/portfolio.py`
 2. Calculate metric in `PortfolioSimulator.simulate()`
 3. Add to reporting in `core/grid_test/reporter.py`
+
+### Baseline trades snapshot test
+
+The test `tests/test_evaluation/test_baseline_trades_snapshot.py` checks that baseline evaluation on a short window (2012) produces the same trades as a stored snapshot. It requires djia data for 2012 and the golden file `tests/snapshots/baseline_trades_short.csv`. To create or refresh the snapshot after downloading data: `make baseline-snapshot-generate`. Create the snapshot directory first: `mkdir -p tests/snapshots`.

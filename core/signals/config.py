@@ -24,6 +24,8 @@ from core.shared.defaults import (
     RISK_REWARD_RATIO, POSITION_SIZE_PCT, MAX_POSITIONS,
     USE_CONFIDENCE_SIZING, CONFIDENCE_SIZE_MULTIPLIER,
     USE_CONFIRMATION_MODULATION, CONFIRMATION_SIZE_FACTORS,
+    USE_FLEXIBLE_SIZING, FLEXIBLE_SIZING_METHOD, FLEXIBLE_SIZING_TARGET_RR,
+    MAX_POSITIONS_PER_INSTRUMENT,
     USE_TREND_FILTER,
     STEP_DAYS, LOOKBACK_DAYS,
 )
@@ -130,6 +132,14 @@ class StrategyConfig:
     # Confirmation-based position sizing modulation (from shared.defaults)
     use_confirmation_modulation: bool = USE_CONFIRMATION_MODULATION  # Multiplicative sizing based on confirmations
     confirmation_size_factors: Dict[int, float] = field(default_factory=lambda: CONFIRMATION_SIZE_FACTORS.copy())
+    
+    # Flexible position sizing (from shared.defaults)
+    use_flexible_sizing: bool = USE_FLEXIBLE_SIZING  # Enable flexible sizing based on signal quality
+    flexible_sizing_method: str = FLEXIBLE_SIZING_METHOD  # "confidence", "risk_reward", or "combined"
+    flexible_sizing_target_rr: float = FLEXIBLE_SIZING_TARGET_RR  # Target risk/reward ratio for risk_reward method
+    
+    # Per-instrument position limits
+    max_positions_per_instrument: Optional[int] = MAX_POSITIONS_PER_INSTRUMENT  # None = no limit, otherwise max positions per instrument
     
     # Trend filtering (from shared.defaults)
     use_trend_filter: bool = USE_TREND_FILTER  # Only trade in direction of EMA trend

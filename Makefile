@@ -1,4 +1,4 @@
-.PHONY: help clean download evaluate grid-search test test-cov
+.PHONY: help clean download evaluate grid-search test test-cov baseline-snapshot-generate
 
 # Default target
 help:
@@ -10,6 +10,7 @@ help:
 	@echo "  make grid-search           Compare multiple configs from configs/ (auto-parallel, auto-charts)"
 	@echo "  make test                  Run tests with pytest"
 	@echo "  make test-cov              Run tests with coverage report (development only)"
+	@echo "  make baseline-snapshot-generate  Create/refresh baseline trades snapshot (2012; for regression test)"
 	@echo ""
 	@echo "Command Options (append to any command):"
 	@echo "  ARGS='...'                 Pass CLI arguments"
@@ -57,6 +58,10 @@ test:
 
 test-cov:
 	docker compose run --rm --build cli pytest --cov=core --cov-report=term-missing --cov-report=html
+
+# Baseline snapshot: run after make download to create/refresh tests/snapshots/baseline_trades_short.csv
+baseline-snapshot-generate:
+	docker compose run --rm --build cli python scripts/generate_baseline_snapshot.py
 
 # Cleanup
 clean:

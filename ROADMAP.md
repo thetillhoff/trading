@@ -19,58 +19,20 @@ For comprehensive hypothesis testing results, strategy comparisons, and detailed
 
 ## Next Steps (Priority Order)
 
-### High Priority - Immediate Testing
+Evidence for completed work is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md).
 
-1. **Position Sizing Upper Bound Testing**
-   - Test position sizing 0.35-0.4 to find upper bound (0.3 is optimal so far)
-   - Test max_positions variations with position 0.3 (currently 10, test 5, 15, 20)
-   - Test flexible position sizing (doesn't have to be full amount if confidence is lacking)
-   - Test per-instrument position limits (not just global max_positions)
+### High Priority
 
-2. **Multi-Instrument Validation**
-   - Test optimized configs on S&P 500, DAX, Gold
-   - Validate if optimized strategies work across different markets
-   - Use multi-instrument configs for unified portfolio testing
-   - Test correlation analysis across instruments
+### Medium Priority - Strategy
 
-### Medium Priority - Strategy Optimization
-
-4. **Inverted Elliott Wave Investigation** ⚠️
-   - Full period test: Inverted EW reduces alpha vs baseline (+106% vs +132%)
-   - Inverted EW alone fails catastrophically (-30% alpha)
-   - Investigate root cause: signal quality, parameter mismatch, or fundamental flaw?
-   - Test alternative approaches: different inversion methods, parameter optimization
-   - Consider removing inverted EW feature if no improvement found
-   - **Status:** Not recommended for production - baseline remains optimal
-
-5. **Regime Detection Investigation**
-   - Investigate why regime detection shows no benefit (identical results to baseline)
-   - Review regime detection implementation for bugs
-   - Re-evaluate regime detection logic and thresholds
-   - Consider removing or redesigning the approach
-   - Test regime detection with different market conditions
-   - Add flexible regime types (high/low volatility, range-bound/trending)
+- **Regime redesign or removal:** ADX regime (25–40) shows no benefit (HYPOTHESIS_TEST_RESULTS). Try different regime logic (e.g. volatility, range vs trend) or remove.
+- **Inverted Elliott Wave:** Does not improve alpha (HYPOTHESIS_TEST_RESULTS). Optional: investigate root cause or remove feature.
 
 ### Medium Priority - Risk Management
 
-6. **Time-Based Trade Constraints**
-   - Add min-holding time per trade in config (prevent 1-day stop-outs)
-   - Test: 3-5 day minimum hold period
-   - Expected: Higher win rate, ride winners longer
-   - Add time-based stops (exit after N days regardless of price)
-
-7. **Advanced Position Sizing & Constraints**
-   - Kelly Criterion position sizing (size based on win rate and expectancy)
-   - Min/max position size limits
-   - Risk-per-trade limits (max % capital at risk per position)
-   - Portfolio rebalancing (dynamic sizing based on current exposure)
-   - If complete "wallet" is invested, no further trade possible until another finishes
-
-8. **Risk-Adjusted Performance Metrics**
-   - Sharpe ratio, Sortino ratio tracking and optimization
-   - Target max Sharpe ratio instead of just returns
-   - Maximum drawdown analysis and optimization
-   - Rolling window performance analysis
+- **Time-based trade constraints:** Min-holding time per trade, time-based stops (exit after N days).
+- **Advanced position sizing:** Kelly, min/max limits, risk-per-trade limits, rebalancing. Additive confidence sizing is optimal (HYPOTHESIS_TEST_RESULTS); open: test max_positions at 0.5–0.7 if constraint ever binds.
+- **Risk-adjusted metrics:** Sharpe/Sortino, max drawdown, rolling window.
 
 ---
 
@@ -81,14 +43,13 @@ For comprehensive hypothesis testing results, strategy comparisons, and detailed
 - **Wave 5:** Equal to Wave 1 or 0.618× Wave 3
 - **Wave C:** Equal to Wave A or 1.618× Wave A
 
-### 3. Stricter Pattern Rules (reduce false signals)
+### 2. Stricter Pattern Rules (reduce false signals)
 - Wave 4 cannot overlap Wave 1
 - Wave 3 must not be shortest
 - Validate internal structure
 
 ### 3. Parameter Optimization
-- **Multi-timeframe:** Detect on daily, confirm on weekly
-- **Note:** Wave size 0.01 and confidence 0.7 already tested (see HYPOTHESIS_TEST_RESULTS.md)
+- **Multi-timeframe:** Detect on daily, confirm on weekly.
 
 
 ## Future Enhancements (Lower Priority)
@@ -205,26 +166,8 @@ For comprehensive hypothesis testing results, strategy comparisons, and detailed
 
 ## Status & Metrics
 
-**Targets Achieved:** ✅ 130%+ alpha (optimized config), ✅ Position sizing optimization successful, ✅ Risk management optimization successful
-
-**Next Targets:** 
-- Test position sizing 0.35-0.4 to find upper bound (0.3 is optimal so far)
-- Test max_positions variations with position 0.3 (currently 10, test 5, 15, 20)
-- Test on multiple instruments (S&P 500, DAX, Gold)
-- Investigate why inverted EW alone fails (-30% alpha) or remove feature
-
-**Usage:**
-```bash
-# Current best strategy (using config file)
-make evaluate ARGS="--config configs/baseline.yaml --charts"
-
-# Multi-instrument testing
-make evaluate ARGS="--config configs/multi_instrument/ew_all_indicators_multi.yaml --charts"
-```
-
-For detailed performance metrics and hypothesis test results, see [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md).
+Evidence for tested hypotheses (position sizing, risk/reward, EW params, trend filter, regime, multi-instrument, inverted EW, etc.) is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md). Open items are listed under Next Steps above.
 
 ---
 
-**Last Updated:** January 25, 2026  
-**Current Baseline:** `configs/baseline.yaml` (position 0.3, risk_reward 2.5, +132% alpha)
+**Current baseline:** `configs/baseline.yaml` (position 0.35, risk_reward 2.5). Evidence for these choices is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md) (Position Sizing and Risk Management, Risk/Reward Ratio). Optional upgrade: EW confidence 0.60–0.70, wave_length 0.30 (see Elliott Wave Parameter Sweep).
