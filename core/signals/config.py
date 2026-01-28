@@ -37,6 +37,7 @@ class SignalConfig:
     # Indicator enable/disable
     use_elliott_wave: bool = False
     use_elliott_wave_inverted: bool = False
+    use_elliott_wave_inverted_exit: bool = False  # Inverted EW SELLs close longs (sell-to-close)
     use_rsi: bool = False
     use_ema: bool = False
     use_macd: bool = False
@@ -79,9 +80,10 @@ class StrategyConfig:
     
     # Inverted Elliott Wave detection parameters (for sell signal generation via price inversion)
     use_elliott_wave_inverted: bool = False
+    use_elliott_wave_inverted_exit: bool = False  # Inverted EW SELLs close longs (sell-to-close)
     min_confidence_inverted: float = ELLIOTT_INVERTED_MIN_CONFIDENCE
     min_wave_size_inverted: float = ELLIOTT_INVERTED_MIN_WAVE_SIZE
-    
+
     # Indicator on/off settings (all indicators work the same way)
     use_rsi: bool = False
     use_ema: bool = False

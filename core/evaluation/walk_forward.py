@@ -292,6 +292,7 @@ class WalkForwardEvaluator:
             min_confidence=config.min_confidence,
             min_wave_size=config.min_wave_size,
             use_elliott_wave_inverted=getattr(config, 'use_elliott_wave_inverted', False),
+            use_elliott_wave_inverted_exit=getattr(config, 'use_elliott_wave_inverted_exit', False),
             min_confidence_inverted=getattr(config, 'min_confidence_inverted', ELLIOTT_INVERTED_MIN_CONFIDENCE),
             min_wave_size_inverted=getattr(config, 'min_wave_size_inverted', ELLIOTT_INVERTED_MIN_WAVE_SIZE),
             use_rsi=getattr(config, 'use_rsi', False),

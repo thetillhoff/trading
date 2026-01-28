@@ -222,6 +222,18 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 
 ---
 
+## Inverted Elliott Wave Exit (Sell-to-Close)
+
+### Inverted EW with sell-to-close (SELLs close longs) improves alpha vs baseline
+
+**Hypothesis:** Using inverted Elliott Wave in “exit-only” mode (SELL signals close open longs instead of opening shorts) improves alpha over the same baseline without this feature.
+
+**Findings:** Configs in `configs/hypothesis_inverted_exit/`: control (baseline, no inverted exit) vs inverted_exit (baseline + elliott_wave_inverted_exit). Period 2018–2020, DJIA: control +19.52% alpha, 129 trades, 46.5% win rate; inverted_exit +4.84% alpha, 138 trades, 39.1% win rate. Delta: alpha -14.69%, trades +9. Sell-to-close signals fire and add exits; they reduce alpha and win rate.
+
+**Conclusion:** REJECTED. Under circumstances: 2018–2020, DJIA, EW+indicators baseline — inverted EW exit (sell-to-close) reduces alpha and win rate versus control. The extra exits from inverted EW SELLs close longs earlier than target/stop would, cutting winners. Baseline (control) remains preferable.
+
+---
+
 ## Multi-Instrument and Regime (Additional Evidence)
 
 ### Single-index choice (DJIA vs S&P 500 vs DAX vs Gold) or multi-index aggregation changes alpha
@@ -285,6 +297,29 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 **Findings:** Sweep of eight configs (baseline plus EMA 15/40, 25/60; MACD signal 9, 15; RSI period 5, 9, 14): RSI period 5 yields highest alpha (+165.13%), then baseline (+153.57%), then MACD signal 15 (+131.46%), ema_25_60 (+117.26%), ema_15_40 (+95.62%), macd_signal_09 (+92.90%), rsi_period_14 (+84.02%), rsi_period_09 (+75.07%). Win rates 41.4–42.8%; trade counts 1373–1810. RSI period 5 adds ~11.6 pp alpha over baseline; MACD 15 and EMA variants trail baseline.
 
 **Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, full period 2000–2020, EW+all indicators, position 0.35, risk_reward 2.5 — RSI period 5 is optimal among the tested EMA/MACD/RSI variants; baseline (RSI 7) is second. MACD signal 15 outperforms baseline MACD signal 12; EMA 15/40 and 25/60 underperform baseline EMA 20/50.
+
+---
+
+## Long vs Short Trade Performance
+
+### Long and short trades have different performance; one side contributes more to alpha
+
+**Hypothesis:** Long and short trades have different performance; one side contributes more to alpha or has better win rate/expectancy.
+
+**Findings:** Baseline trades (full period, DJIA, EW+all indicators, position 0.35, risk_reward 2.5):
+
+| Metric              | Long (buy) | Short (sell) |
+| ------------------- | ---------- | ------------ |
+| Trade count         | 927        | 883          |
+| Win rate %          | 46.71      | 37.83        |
+| Total PnL           | 243.33     | 1.05         |
+| Avg PnL % per trade | 0.26       | 0.02         |
+| Avg win % (winners) | 1.93       | 1.40         |
+| Avg loss % (losers) | -1.21      | -0.82        |
+
+Total PnL % (Long): 0.30%. Total PnL % (Short): 0.00%. Long trades dominate total PnL and win rate; short trades contribute negligibly.
+
+**Conclusion:** ACCEPTED. Long trades contribute substantially more under the tested circumstances. Under circumstances: baseline config, full period 2000–2020, DJIA, EW+all indicators, position 0.35, risk_reward 2.5 — long (buy) trades have higher win rate, total PnL, and avg PnL %; short (sell) trades are roughly break-even in total PnL with lower win rate.
 
 ---
 

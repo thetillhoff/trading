@@ -3,6 +3,7 @@
 ## General Rules
 
 - Don't write .md files unless asked to.
+- Don't add make targets unless asked to.
 - DO NOT GIVE ME HIGH LEVEL SHIT, IF I ASK FOR FIX OR EXPLANATION, I WANT ACTUAL CODE OR EXPLANATION!!! I DON'T WANT "Here's how you can blablabla"
 - Be casual unless otherwise specified
 - Be terse

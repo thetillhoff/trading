@@ -61,7 +61,8 @@ Unified command-line interface for all operations:
 
 - `make download` - Download market data
 - `make evaluate` - Run strategy evaluation (defaults to `configs/baseline.yaml`, auto-generates charts)
-- `make grid-search` - Compare multiple strategies from `configs/` (auto-parallel, auto-charts)
+- `make grid-search` - Compare multiple strategies from `configs/` (auto-parallel, auto-charts). Use `--output-dir` to direct outputs (e.g. when driving multi-period runs).
+- `make hypothesis-tests` - Multi-period hypothesis tests via `cli.hypothesis`: grid-search per period (category/period selectable), then runs CSV-based analysis on the results dir and writes `analysis_report.md` plus aggregated CSVs there. To run analysis only on an existing dir: `make grid-search ARGS='--analyze results/hypothesis_tests_YYYYMMDD/'`.
 
 ## Quick Commands
 

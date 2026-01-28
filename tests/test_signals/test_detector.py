@@ -16,13 +16,15 @@ import numpy as np
 
 from core.signals.detector import SignalDetector
 from core.signals.config import SignalConfig
+from core.shared.types import SignalType
 
 
-def _config(use_elliott_wave: bool, use_elliott_wave_inverted: bool, min_confidence: float = 0.0, min_confidence_inverted: float = 0.0, min_wave_size: float = 0.0, min_wave_size_inverted: float = 0.0):
+def _config(use_elliott_wave: bool, use_elliott_wave_inverted: bool, use_elliott_wave_inverted_exit: bool = False, min_confidence: float = 0.0, min_confidence_inverted: float = 0.0, min_wave_size: float = 0.0, min_wave_size_inverted: float = 0.0):
     """Minimal SignalConfig for EW / inverted EW only."""
     return SignalConfig(
         use_elliott_wave=use_elliott_wave,
         use_elliott_wave_inverted=use_elliott_wave_inverted,
+        use_elliott_wave_inverted_exit=use_elliott_wave_inverted_exit,
         use_rsi=False,
         use_ema=False,
         use_macd=False,
@@ -115,6 +117,26 @@ class TestInvertedElliottWave:
         signals = det._get_inverted_elliott_wave_signals(data, None)
         for s in signals:
             assert s.source in ("elliott_inverted", "combined_inverted")
+
+    def test_inverted_ew_exit_sells_have_close_long_only(self, asymmetric_prices):
+        """When use_elliott_wave_inverted_exit=True, SELLs from inverted EW have close_long_only=True."""
+        data = asymmetric_prices
+        config = _config(use_elliott_wave=False, use_elliott_wave_inverted=False, use_elliott_wave_inverted_exit=True, min_confidence_inverted=0.0, min_wave_size_inverted=0.0)
+        det = SignalDetector(config)
+        signals = det.detect_signals(data)
+        sell_signals = [s for s in signals if s.signal_type == SignalType.SELL]
+        for s in sell_signals:
+            assert getattr(s, 'close_long_only', False) is True, "Inverted exit SELLs must have close_long_only=True"
+
+    def test_inverted_ew_open_short_sells_have_no_close_long_only(self, asymmetric_prices):
+        """When use_elliott_wave_inverted=True and use_elliott_wave_inverted_exit=False, SELLs have close_long_only=False."""
+        data = asymmetric_prices
+        config = _config(use_elliott_wave=False, use_elliott_wave_inverted=True, use_elliott_wave_inverted_exit=False, min_confidence_inverted=0.0, min_wave_size_inverted=0.0)
+        det = SignalDetector(config)
+        signals = det.detect_signals(data)
+        sell_signals = [s for s in signals if s.signal_type == SignalType.SELL]
+        for s in sell_signals:
+            assert getattr(s, 'close_long_only', False) is False
 
 
 def _signal_set(signals):

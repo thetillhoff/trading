@@ -30,6 +30,7 @@ class PositionStatus(Enum):
     CLOSED_TARGET = "closed_target"
     CLOSED_STOP = "closed_stop"
     CLOSED_TIMEOUT = "closed_timeout"
+    CLOSED_SIGNAL = "closed_signal"  # Closed by sell-to-close signal (no short opened)
     CLOSED_END = "closed_end"  # Still open at end of simulation
 
 
@@ -342,9 +343,24 @@ class PortfolioSimulator:
             # 2. Check for new signals on this date
             if date in signal_by_date:
                 for sig in signal_by_date[date]:
+                    # Sell-to-close: SELL with close_long_only closes oldest long, no short opened
+                    if (sig.signal_type == SignalType.SELL
+                            and getattr(sig, 'close_long_only', False)):
+                        longs = [p for p in open_positions if p.signal_type == "buy"]
+                        if longs:
+                            oldest = min(longs, key=lambda p: p.entry_timestamp)
+                            oldest.exit_timestamp = timestamp
+                            oldest.exit_price = price
+                            oldest.status = PositionStatus.CLOSED_SIGNAL
+                            oldest.pnl = (price - oldest.entry_price) * oldest.shares
+                            cash += oldest.cost_basis + oldest.pnl
+                            open_positions = [p for p in open_positions if p is not oldest]
+                            closed_positions.append(oldest)
+                        continue  # Do not open a short for this signal
+
                     # Store original signal type for tracking
                     original_signal_type = sig.signal_type
-                    
+
                     # Check if we can open a new position
                     if len(open_positions) >= self.max_positions:
                         continue  # Already at max positions

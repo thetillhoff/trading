@@ -49,3 +49,6 @@ class TradingSignal:
     
     # Instrument identifier (for multi-instrument trading)
     instrument: Optional[str] = None  # Instrument symbol (e.g., "djia", "sp500")
+
+    # Sell-to-close: when True, SELL signals close an open long instead of opening a short
+    close_long_only: bool = False

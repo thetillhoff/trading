@@ -4,7 +4,11 @@ Tests for portfolio simulator.
 import pytest
 import pandas as pd
 import numpy as np
-from core.evaluation.portfolio import PortfolioSimulator, PositionStatus
+from core.evaluation.portfolio import (
+    PortfolioSimulator,
+    PositionStatus,
+    SimulationResult,
+)
 from core.shared.types import TradingSignal, SignalType
 
 
@@ -82,3 +86,44 @@ class TestPortfolioSimulator:
         )
         
         assert sim.max_positions == 3
+
+    def test_sell_to_close_closes_oldest_long(self):
+        """SELL with close_long_only=True closes oldest open long, does not open short."""
+        dates = pd.date_range('2020-01-01', periods=15, freq='D')
+        prices = pd.Series(100.0 + np.arange(15) * 0.5, index=dates)
+        signals = [
+            TradingSignal(
+                signal_type=SignalType.BUY,
+                timestamp=dates[0],
+                price=100.0,
+                confidence=0.8,
+                target_price=120.0,
+                stop_loss=90.0,
+                reasoning="Buy",
+            ),
+            TradingSignal(
+                signal_type=SignalType.SELL,
+                timestamp=dates[5],
+                price=102.5,
+                confidence=0.7,
+                target_price=95.0,
+                stop_loss=108.0,
+                reasoning="Sell-to-close",
+                close_long_only=True,
+            ),
+        ]
+        sim = PortfolioSimulator(
+            initial_capital=100.0,
+            position_size_pct=0.5,
+            max_positions=5,
+        )
+        result: SimulationResult = sim.simulate_strategy(prices, signals)
+        assert result.total_trades == 1
+        closed = result.positions[0]
+        assert closed.status == PositionStatus.CLOSED_SIGNAL
+        assert closed.signal_type == "buy"
+        assert closed.exit_timestamp == dates[5]
+        assert closed.exit_price == 102.5
+        # No short was opened: only one position existed and it was a long that got closed
+        shorts = [p for p in result.positions if p.signal_type == "sell"]
+        assert len(shorts) == 0

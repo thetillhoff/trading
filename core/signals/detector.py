@@ -54,9 +54,10 @@ class SignalDetector:
             macd_signal=getattr(config, 'macd_signal', 12),
         )
         
-        # Create Elliott Wave detector if enabled (shared for both regular and inverted)
+        # Create Elliott Wave detector if enabled (shared for regular, inverted, and inverted-exit)
         self.elliott_detector = None
-        if getattr(config, 'use_elliott_wave', False) or getattr(config, 'use_elliott_wave_inverted', False):
+        if (getattr(config, 'use_elliott_wave', False) or getattr(config, 'use_elliott_wave_inverted', False)
+                or getattr(config, 'use_elliott_wave_inverted_exit', False)):
             self.elliott_detector = ElliottWaveDetector()
     
     def detect_signals(self, data: pd.Series) -> List[Signal]:
@@ -86,8 +87,14 @@ class SignalDetector:
             ew_signals = self._get_elliott_wave_signals(data, indicator_df)
             signals.extend(ew_signals)
         
-        # Get signals from inverted Elliott Wave (for sell signal generation)
-        if getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
+        # Get signals from inverted Elliott Wave: exit-only (sell-to-close) or open-short
+        if getattr(self.config, 'use_elliott_wave_inverted_exit', False) and self.elliott_detector:
+            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            for s in inverted_ew_signals:
+                if s.signal_type == SignalType.SELL:
+                    s.close_long_only = True
+            signals.extend(inverted_ew_signals)
+        elif getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
             inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
             signals.extend(inverted_ew_signals)
         
@@ -131,8 +138,14 @@ class SignalDetector:
             ew_signals = self._get_elliott_wave_signals(data, indicator_df)
             signals.extend(ew_signals)
         
-        # Get signals from inverted Elliott Wave (for sell signal generation)
-        if getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
+        # Get signals from inverted Elliott Wave: exit-only (sell-to-close) or open-short
+        if getattr(self.config, 'use_elliott_wave_inverted_exit', False) and self.elliott_detector:
+            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            for s in inverted_ew_signals:
+                if s.signal_type == SignalType.SELL:
+                    s.close_long_only = True
+            signals.extend(inverted_ew_signals)
+        elif getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
             inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
             signals.extend(inverted_ew_signals)
 
@@ -369,7 +382,9 @@ class SignalDetector:
         """
         signals = []
         
-        if not getattr(self.config, 'use_elliott_wave_inverted', False):
+        # Run when either open-short or exit-only inverted EW is enabled
+        if not (getattr(self.config, 'use_elliott_wave_inverted', False)
+                or getattr(self.config, 'use_elliott_wave_inverted_exit', False)):
             return signals
         
         if not self.elliott_detector:

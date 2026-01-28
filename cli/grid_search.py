@@ -21,6 +21,7 @@ from core.signals.config_loader import load_config_from_yaml
 from core.signals.detector import SignalDetector
 from core.evaluation.walk_forward import WalkForwardEvaluator, WalkForwardResult
 from core.grid_test.reporter import ComparisonReporter
+from core.grid_test.analysis import analyze_results_dir
 from datetime import datetime
 
 
@@ -46,8 +47,8 @@ Examples:
     # Grid search on specific time range
     python -m cli.grid_search --instrument sp500 --start-date 2010-01-01 --end-date 2020-01-01
 
-    # With charts and CSV
-    python -m cli.grid_search --instrument djia --charts --csv
+    # Analyze only (e.g. after hypothesis runs): write analysis_report.md and CSVs into DIR
+    python -m cli.grid_search --analyze results/hypothesis_tests_YYYYMMDD_HHMMSS
         """
     )
     
@@ -88,8 +89,23 @@ Examples:
         default="configs",
         help="Load all YAML configs from directory (recursive, default: configs/)",
     )
+    parser.add_argument(
+        "--analyze",
+        type=str,
+        metavar="DIR",
+        help="Run analysis only on an existing results dir (skips grid search). For multi-period dirs (e.g. hypothesis_tests_*), writes analysis_report.md and CSVs into DIR.",
+    )
     args = parser.parse_args()
-    
+
+    # Analyze-only mode: run core analysis on DIR and exit
+    if args.analyze:
+        results_dir = Path(args.analyze)
+        if not results_dir.exists():
+            print(f"Error: Results directory not found: {results_dir}", file=sys.stderr)
+            return 1
+        ok = analyze_results_dir(results_dir, verbose=True)
+        return 0 if ok else 1
+
     # Print grid search header
     print("=" * 80)
     print("GRID SEARCH - MULTI-STRATEGY COMPARISON")
@@ -204,9 +220,12 @@ Examples:
     
     print(f"\nCompleted {len(results)}/{len(configs)} configurations")
     
-    # Create grid search summary directory with timestamp
+    # Create grid search summary directory (use --output-dir when provided for hypothesis-test flows)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    summary_dir = Path("results") / f"grid_search_{timestamp}"
+    if args.output_dir:
+        summary_dir = Path(args.output_dir)
+    else:
+        summary_dir = Path("results") / f"grid_search_{timestamp}"
     summary_dir.mkdir(parents=True, exist_ok=True)
     
     # Save per-config results to matching results/ structure
@@ -215,7 +234,7 @@ Examples:
         config = result.config
         # Get relative path from configs/ for this config
         rel_path = getattr(config, '_source_path', None) or config_file_map.get(config.name, Path(config.name))
-        result_dir = Path("results") / rel_path
+        result_dir = summary_dir / rel_path if args.output_dir else Path("results") / rel_path
         result_dir.mkdir(parents=True, exist_ok=True)
         
         # Save individual config results with charts
@@ -249,6 +268,10 @@ Examples:
     
     # Generate analysis report
     reporter.generate_analysis_report(results, filename=f"analysis_report_{timestamp}.md")
+    
+    # Run core CSV-based analysis (analysis_report.md, all_results_combined.csv, alpha_pivot)
+    print("\nRunning CSV analysis...")
+    analyze_results_dir(summary_dir, verbose=True)
     
     print(f"\nResults saved:")
     print(f"  Summary directory: {summary_dir}")

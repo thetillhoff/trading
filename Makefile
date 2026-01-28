@@ -1,4 +1,4 @@
-.PHONY: help clean download evaluate grid-search test test-cov baseline-snapshot-generate
+.PHONY: help clean download evaluate grid-search test test-cov baseline-snapshot-generate hypothesis-long-short
 
 # Default target
 help:
@@ -8,9 +8,11 @@ help:
 	@echo "  make download              Download/update market data for instruments"
 	@echo "  make evaluate              Evaluate a strategy (default: baseline.yaml, generates charts)"
 	@echo "  make grid-search           Compare multiple configs from configs/ (auto-parallel, auto-charts)"
+	@echo "  make hypothesis-tests      Run multi-period hypothesis suites (category/period selection)"
 	@echo "  make test                  Run tests with pytest"
 	@echo "  make test-cov              Run tests with coverage report (development only)"
 	@echo "  make baseline-snapshot-generate  Create/refresh baseline trades snapshot (2012; for regression test)"
+	@echo "  make hypothesis-long-short       Print long vs short trade breakdown from latest baseline trades CSV"
 	@echo ""
 	@echo "Command Options (append to any command):"
 	@echo "  ARGS='...'                 Pass CLI arguments"
@@ -22,6 +24,11 @@ help:
 	@echo "  make evaluate ARGS='--config configs/top_performers/ew_rsi.yaml'"
 	@echo "  make grid-search                                         # Test all configs in configs/"
 	@echo "  make grid-search ARGS='--config-dir configs/optimization'  # Test specific subdirectory"
+	@echo "  make grid-search ARGS='--output-dir results/my_run ...'    # Direct outputs to a path (e.g. for hypothesis-test flows)"
+	@echo "  make grid-search ARGS='--analyze results/hypothesis_tests_YYYYMMDD/'  # Run analysis only on an existing results dir"
+	@echo ""
+	@echo "Hypothesis tests (multi-period + analysis):"
+	@echo "  make hypothesis-tests ARGS='--category rsi_tests --period quick_test'  # Run hypothesis suite via cli.hypothesis"
 	@echo ""
 	@echo "Data Directory:"
 	@echo "  ./data/                    Downloaded market data (created by download command)"
@@ -29,6 +36,7 @@ help:
 	@echo "Results:"
 	@echo "  ./results/                 Per-config results (matching configs/ structure)"
 	@echo "  ./results/grid_search_*/    Grid search summary (charts, analysis)"
+	@echo "  ./results/hypothesis_tests_*/  Multi-period runs from run_hypothesis_tests.sh; analysis_report.md written there after each run"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean                 Remove unused Docker images"
@@ -52,6 +60,9 @@ evaluate:
 grid-search:
 	$(DOCKER_CLI) cli.grid_search $(ARGS)
 
+hypothesis-tests:
+	$(DOCKER_CLI) cli.hypothesis $(ARGS)
+
 # Testing
 test:
 	docker compose run --rm --build cli pytest
@@ -62,6 +73,10 @@ test-cov:
 # Baseline snapshot: run after make download to create/refresh tests/snapshots/baseline_trades_short.csv
 baseline-snapshot-generate:
 	docker compose run --rm --build cli python scripts/generate_baseline_snapshot.py
+
+# Long vs short: analyze latest baseline trades CSV (run make evaluate first to produce trades)
+hypothesis-long-short:
+	docker compose run --rm --build cli python scripts/run_long_short_hypothesis.py
 
 # Cleanup
 clean:

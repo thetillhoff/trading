@@ -46,6 +46,7 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
     indicators = config_dict.get('indicators', {})
     elliott = indicators.get('elliott_wave', {})
     elliott_inverted = indicators.get('elliott_wave_inverted', {})
+    elliott_inverted_exit = indicators.get('elliott_wave_inverted_exit', {})
     rsi = indicators.get('rsi', {})
     ema = indicators.get('ema', {})
     macd = indicators.get('macd', {})
@@ -77,6 +78,7 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         
         # Inverted Elliott Wave
         use_elliott_wave_inverted=elliott_inverted.get('enabled', False),
+        use_elliott_wave_inverted_exit=elliott_inverted_exit.get('enabled', False),
         min_confidence_inverted=elliott_inverted.get('min_confidence', ELLIOTT_INVERTED_MIN_CONFIDENCE),
         min_wave_size_inverted=elliott_inverted.get('min_wave_size', ELLIOTT_INVERTED_MIN_WAVE_SIZE),
         
@@ -157,6 +159,9 @@ def save_config_to_yaml(config: StrategyConfig, yaml_path: Union[str, Path]):
                 'enabled': config.use_elliott_wave_inverted,
                 'min_confidence': config.min_confidence_inverted,
                 'min_wave_size': config.min_wave_size_inverted,
+            },
+            'elliott_wave_inverted_exit': {
+                'enabled': config.use_elliott_wave_inverted_exit,
             },
             'rsi': {
                 'enabled': config.use_rsi,
