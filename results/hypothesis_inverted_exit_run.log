@@ -1,67 +1,0 @@
-time="2026-01-28T00:55:37+01:00" level=warning msg="No services to build"
-time="2026-01-28T00:55:38+01:00" level=warning msg="No services to build"
- Container trading-cli-run-abf33b2f5058 Creating 
- Container trading-cli-run-abf33b2f5058 Created 
-============================================================
-HYPOTHESIS: Inverted EW exit (sell-to-close) vs control
-============================================================
-Control: control (no elliott_wave_inverted_exit)
-Treatment: inverted_exit (elliott_wave_inverted_exit enabled)
-Period: 2018-01-01 to 2020-01-01
-============================================================
-
---- Evaluating control ---
-Evaluating on 1 instrument: djia
-Date range: 2018-01-01 to 2020-01-01
-Walk-forward evaluation: 2018-04-12 to 2020-01-01
-  Lookback: 365 days, Step: 1 days
-  Config: control
-  Evaluation points: 434
-  Progress: 43/434 (10%) - 19 signals - 1.6s  Progress: 86/434 (20%) - 32 signals - 5.6s  Progress: 129/434 (30%) - 44 signals - 13.3s  Progress: 172/434 (40%) - 57 signals - 26.4s  Progress: 215/434 (50%) - 75 signals - 43.3s  Progress: 258/434 (59%) - 87 signals - 59.8s  Progress: 301/434 (69%) - 105 signals - 75.8s  Progress: 344/434 (79%) - 121 signals - 91.2s  Progress: 387/434 (89%) - 138 signals - 105.4s  Progress: 430/434 (99%) - 152 signals - 121.3s  Progress: 434/434 (100%) - 152 signals - 122.7s  Signal detection completed in 122.7s                              
-  Total unique signals detected: 152
-  Simulating portfolio...
-    Portfolio simulation: 43/434 (10%) - 11 trades closed - 0.0s    Portfolio simulation: 86/434 (20%) - 25 trades closed - 0.0s    Portfolio simulation: 129/434 (30%) - 38 trades closed - 0.0s    Portfolio simulation: 172/434 (40%) - 58 trades closed - 0.0s    Portfolio simulation: 215/434 (50%) - 70 trades closed - 0.0s    Portfolio simulation: 258/434 (59%) - 81 trades closed - 0.0s    Portfolio simulation: 301/434 (69%) - 98 trades closed - 0.0s    Portfolio simulation: 344/434 (79%) - 108 trades closed - 0.0s    Portfolio simulation: 387/434 (89%) - 121 trades closed - 0.0s    Portfolio simulation: 430/434 (99%) - 129 trades closed - 0.0s    Portfolio simulation: 434/434 (100%) - 129 trades closed - 0.0s                                                                                  Portfolio simulation completed in 0.0s
-
-  Results:
-    Trades: 129
-    Win Rate: 46.5%
-    Avg Exposure: 40.6%
-    Total Return: 26.25%
-    Market (100% invested): 16.56%
-    Hybrid Return: 36.09%
-    Alpha vs Buy-and-Hold: +19.52%
-
---- Evaluating inverted_exit ---
-Evaluating on 1 instrument: djia
-Date range: 2018-01-01 to 2020-01-01
-Walk-forward evaluation: 2018-04-12 to 2020-01-01
-  Lookback: 365 days, Step: 1 days
-  Config: inverted_exit
-  Evaluation points: 434
-  Progress: 43/434 (10%) - 19 signals - 1.5s  Progress: 86/434 (20%) - 32 signals - 5.6s  Progress: 129/434 (30%) - 44 signals - 13.8s  Progress: 172/434 (40%) - 57 signals - 26.9s  Progress: 215/434 (50%) - 75 signals - 44.3s  Progress: 258/434 (59%) - 87 signals - 61.4s  Progress: 301/434 (69%) - 105 signals - 78.4s  Progress: 344/434 (79%) - 121 signals - 98.9s  Progress: 387/434 (89%) - 138 signals - 117.6s  Progress: 430/434 (99%) - 152 signals - 140.5s  Progress: 434/434 (100%) - 152 signals - 141.9s  Signal detection completed in 141.9s                              
-  Total unique signals detected: 152
-  Simulating portfolio...
-    Portfolio simulation: 43/434 (10%) - 11 trades closed - 0.0s    Portfolio simulation: 86/434 (20%) - 25 trades closed - 0.0s    Portfolio simulation: 129/434 (30%) - 38 trades closed - 0.0s    Portfolio simulation: 172/434 (40%) - 58 trades closed - 0.0s    Portfolio simulation: 215/434 (50%) - 70 trades closed - 0.0s    Portfolio simulation: 258/434 (59%) - 81 trades closed - 0.0s    Portfolio simulation: 301/434 (69%) - 98 trades closed - 0.0s    Portfolio simulation: 344/434 (79%) - 108 trades closed - 0.0s    Portfolio simulation: 387/434 (89%) - 121 trades closed - 0.0s    Portfolio simulation: 430/434 (99%) - 129 trades closed - 0.0s    Portfolio simulation: 434/434 (100%) - 129 trades closed - 0.0s                                                                                  Portfolio simulation completed in 0.0s
-
-  Results:
-    Trades: 129
-    Win Rate: 46.5%
-    Avg Exposure: 40.6%
-    Total Return: 26.25%
-    Market (100% invested): 16.56%
-    Hybrid Return: 36.09%
-    Alpha vs Buy-and-Hold: +19.52%
-
-============================================================
-RESULTS
-============================================================
-Config                  Alpha %   Trades  WinRate %
-------------------------------------------------------------
-control                   19.52      129       46.5
-inverted_exit             19.52      129       46.5
-------------------------------------------------------------
-Delta (inverted_exit - control): alpha +0.00%, trades +0
-============================================================
-
-Results CSV: results/hypothesis_inverted_exit/inverted_exit_hypothesis_20260127_235539.csv
-Analysis: results/hypothesis_inverted_exit/inverted_exit_hypothesis_20260127_235539.md

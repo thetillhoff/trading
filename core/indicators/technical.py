@@ -4,23 +4,17 @@ Technical indicators for trading signal confirmation.
 Provides RSI, EMA, MACD, and other indicators that can be used
 to confirm or filter trading signals.
 """
+import time
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
-import sys
-from pathlib import Path
+from typing import Optional, Tuple, Union, Dict
 
-# Add paths for imports
-core_dir = Path(__file__).parent.parent.parent
-project_root = core_dir.parent
-sys.path.insert(0, str(project_root))
-
-# Import centralized defaults (single source of truth)
-from core.shared.defaults import (
+from ..shared.defaults import (
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
     EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     MACD_FAST, MACD_SLOW, MACD_SIGNAL,
+    ATR_PERIOD, VOLATILITY_WINDOW,
 )
 
 
@@ -50,6 +44,11 @@ class IndicatorValues:
     macd_bullish: bool = False  # Histogram > 0 or turning positive
     macd_bearish: bool = False  # Histogram < 0 or turning negative
 
+    # Volatility (risk assessment, position sizing, confirmation filter)
+    atr: Optional[float] = None  # Average True Range (absolute)
+    atr_pct: Optional[float] = None  # ATR / price (e.g. for sizing)
+    volatility_20: Optional[float] = None  # 20-day rolling std of returns
+
 
 class TechnicalIndicators:
     """Calculates technical indicators from price data."""
@@ -64,6 +63,8 @@ class TechnicalIndicators:
         macd_fast: int = MACD_FAST,  # From shared.defaults
         macd_slow: int = MACD_SLOW,  # From shared.defaults
         macd_signal: int = MACD_SIGNAL,  # From shared.defaults
+        atr_period: int = ATR_PERIOD,  # From shared.defaults
+        volatility_window: int = VOLATILITY_WINDOW,
     ):
         """
         Initialize indicator calculator.
@@ -77,6 +78,8 @@ class TechnicalIndicators:
             macd_fast: MACD fast period (default: from shared.defaults.MACD_FAST)
             macd_slow: MACD slow period (default: from shared.defaults.MACD_SLOW)
             macd_signal: MACD signal period (default: from shared.defaults.MACD_SIGNAL)
+            atr_period: ATR period for volatility (default: from shared.defaults.ATR_PERIOD)
+            volatility_window: Rolling window for return-volatility (default: VOLATILITY_WINDOW)
         """
         self.rsi_period = rsi_period
         self.rsi_oversold = rsi_oversold
@@ -86,6 +89,8 @@ class TechnicalIndicators:
         self.macd_fast = macd_fast
         self.macd_slow = macd_slow
         self.macd_signal = macd_signal
+        self.atr_period = atr_period
+        self.volatility_window = volatility_window
     
     def calculate_rsi(self, prices: pd.Series) -> pd.Series:
         """
@@ -127,6 +132,33 @@ class TechnicalIndicators:
         
         return macd_line, signal_line, histogram
     
+    def calculate_atr(self, data: Union[pd.Series, pd.DataFrame], period: Optional[int] = None) -> pd.Series:
+        """
+        Calculate ATR (Average True Range). Uses High/Low/Close if DataFrame; else Close-only range.
+
+        Args:
+            data: DataFrame with High/Low/Close or Series (Close)
+            period: ATR period (default: self.atr_period)
+
+        Returns:
+            Series of ATR values
+        """
+        period = period or self.atr_period
+        if isinstance(data, pd.DataFrame) and all(c in data.columns for c in ('High', 'Low', 'Close')):
+            high, low, close = data['High'], data['Low'], data['Close']
+            prev_close = close.shift(1)
+            tr1 = high - low
+            tr2 = (high - prev_close).abs()
+            tr3 = (low - prev_close).abs()
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        else:
+            prices = data['Close'] if isinstance(data, pd.DataFrame) else data
+            # Close-only approximation: range over period
+            tr = prices.rolling(period, min_periods=period).apply(lambda x: x.max() - x.min(), raw=True)
+            tr = tr.fillna(0)
+        atr = tr.rolling(period, min_periods=period).mean()
+        return atr
+
     def calculate_adx(self, data: pd.DataFrame, period: int = 14) -> pd.Series:
         """
         Calculate ADX (Average Directional Index) for trend strength detection.
@@ -201,16 +233,25 @@ class TechnicalIndicators:
         
         return adx.fillna(0)
     
-    def calculate_all(self, data: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
+    def calculate_all(
+        self,
+        data: Union[pd.Series, pd.DataFrame],
+        timings: Optional[Dict[str, float]] = None,
+    ) -> pd.DataFrame:
         """
         Calculate all indicators and return as DataFrame.
-        
+
         Args:
             data: Price series or DataFrame with OHLCV columns
-            
+            timings: If provided, accumulate per-indicator elapsed seconds (keys: indicator_rsi, etc.)
+
         Returns:
             DataFrame with all indicator values
         """
+        def _acc(key: str, elapsed: float) -> None:
+            if timings is not None:
+                timings[key] = timings.get(key, 0.0) + elapsed
+
         # Handle both Series and DataFrame input
         if isinstance(data, pd.Series):
             prices = data
@@ -221,43 +262,56 @@ class TechnicalIndicators:
             prices = data['Close'] if 'Close' in data.columns else data.iloc[:, 0]
             df = pd.DataFrame(index=data.index)
             df['price'] = prices
-        
+
         # RSI
+        t0 = time.perf_counter()
         df['rsi'] = self.calculate_rsi(prices)
         df['rsi_oversold'] = df['rsi'] < self.rsi_oversold
         df['rsi_overbought'] = df['rsi'] > self.rsi_overbought
-        
+        _acc('indicator_rsi', time.perf_counter() - t0)
+
         # EMAs
+        t0 = time.perf_counter()
         df['ema_short'] = self.calculate_ema(prices, self.ema_short_period)
         df['ema_long'] = self.calculate_ema(prices, self.ema_long_period)
         df['price_above_ema_short'] = prices > df['ema_short']
         df['price_above_ema_long'] = prices > df['ema_long']
-        
-        # EMA crossovers
         ema_diff = df['ema_short'] - df['ema_long']
         ema_diff_prev = ema_diff.shift(1)
         df['ema_bullish_cross'] = (ema_diff > 0) & (ema_diff_prev <= 0)
         df['ema_bearish_cross'] = (ema_diff < 0) & (ema_diff_prev >= 0)
-        
+        _acc('indicator_ema', time.perf_counter() - t0)
+
         # MACD
+        t0 = time.perf_counter()
         macd_line, signal_line, histogram = self.calculate_macd(prices)
         df['macd_line'] = macd_line
         df['macd_signal'] = signal_line
         df['macd_histogram'] = histogram
-        
-        # MACD conditions
         histogram_prev = histogram.shift(1)
         df['macd_bullish'] = (histogram > 0) | ((histogram > histogram_prev) & (histogram_prev < 0))
         df['macd_bearish'] = (histogram < 0) | ((histogram < histogram_prev) & (histogram_prev > 0))
-        
-        # ADX (for regime detection - trend strength)
-        # Pass full data if available for accurate ADX, otherwise fall back to prices
+        _acc('indicator_macd', time.perf_counter() - t0)
+
+        # ADX
+        t0 = time.perf_counter()
         df['adx'] = self.calculate_adx(data)
-        
-        # 50-day MA and slope (for regime detection - trend direction)
         df['ma_50'] = prices.rolling(50).mean()
-        df['ma_slope'] = df['ma_50'].diff(5)  # 5-day slope for smoothness
-        
+        df['ma_slope'] = df['ma_50'].diff(5)
+        _acc('indicator_adx_ma', time.perf_counter() - t0)
+
+        # Returns + volatility
+        t0 = time.perf_counter()
+        df['return_pct'] = prices.pct_change()
+        df['volatility_20'] = df['return_pct'].rolling(self.volatility_window).std()
+        _acc('indicator_volatility', time.perf_counter() - t0)
+
+        # ATR
+        t0 = time.perf_counter()
+        df['atr'] = self.calculate_atr(data)
+        df['atr_pct'] = (df['atr'] / prices).replace(0, np.nan)
+        _acc('indicator_atr', time.perf_counter() - t0)
+
         return df
     
     def get_indicators_at(
@@ -311,7 +365,77 @@ class TechnicalIndicators:
             macd_histogram=row['macd_histogram'],
             macd_bullish=row['macd_bullish'],
             macd_bearish=row['macd_bearish'],
+            atr=row['atr'] if not pd.isna(row.get('atr', np.nan)) else None,
+            atr_pct=row['atr_pct'] if not pd.isna(row.get('atr_pct', np.nan)) else None,
+            volatility_20=row['volatility_20'] if not pd.isna(row.get('volatility_20', np.nan)) else None,
         )
+
+
+def _confirmation_flags_buy(indicators: IndicatorValues) -> Tuple[Optional[bool], Optional[bool], Optional[bool]]:
+    """Per-indicator confirmation for buy: (rsi_ok, ema_ok, macd_ok). None if indicator not calculated."""
+    rsi_ok = None
+    if indicators.rsi is not None:
+        rsi_ok = indicators.rsi_oversold or indicators.rsi < 40
+
+    ema_ok = None
+    if indicators.ema_short is not None:
+        ema_ok = indicators.price_above_ema_short or indicators.ema_bullish_cross
+
+    macd_ok = None
+    if indicators.macd_histogram is not None:
+        macd_ok = indicators.macd_bullish
+
+    return rsi_ok, ema_ok, macd_ok
+
+
+def _confirmation_flags_sell(indicators: IndicatorValues) -> Tuple[Optional[bool], Optional[bool], Optional[bool]]:
+    """Per-indicator confirmation for sell: (rsi_ok, ema_ok, macd_ok). None if indicator not calculated."""
+    rsi_ok = None
+    if indicators.rsi is not None:
+        rsi_ok = indicators.rsi_overbought or indicators.rsi > 60
+
+    ema_ok = None
+    if indicators.ema_short is not None:
+        ema_ok = not indicators.price_above_ema_short or indicators.ema_bearish_cross
+
+    macd_ok = None
+    if indicators.macd_histogram is not None:
+        macd_ok = indicators.macd_bearish
+
+    return rsi_ok, ema_ok, macd_ok
+
+
+def confirmation_weighted_score(
+    indicators: Optional[IndicatorValues],
+    use_rsi: bool,
+    use_ema: bool,
+    use_macd: bool,
+    weights: Optional[Dict[str, float]] = None,
+    for_buy: bool = True,
+) -> Optional[float]:
+    """
+    Weighted confirmation score in [0, 1]. Returns None if weights not provided or no data.
+    """
+    if indicators is None or not weights:
+        return None
+    flags = _confirmation_flags_buy(indicators) if for_buy else _confirmation_flags_sell(indicators)
+    w_rsi = weights.get("rsi", 1.0)
+    w_ema = weights.get("ema", 1.0)
+    w_macd = weights.get("macd", 1.0)
+    total_weight = 0.0
+    score = 0.0
+    if use_rsi and flags[0] is not None:
+        total_weight += w_rsi
+        score += w_rsi * (1.0 if flags[0] else 0.0)
+    if use_ema and flags[1] is not None:
+        total_weight += w_ema
+        score += w_ema * (1.0 if flags[1] else 0.0)
+    if use_macd and flags[2] is not None:
+        total_weight += w_macd
+        score += w_macd * (1.0 if flags[2] else 0.0)
+    if total_weight <= 0:
+        return None
+    return score / total_weight
 
 
 def check_buy_confirmation(
@@ -319,18 +443,15 @@ def check_buy_confirmation(
     use_rsi: bool = True,
     use_ema: bool = True,
     use_macd: bool = True,
-    require_all: bool = False,
 ) -> Tuple[bool, str, int]:
     """
-    Check if indicators confirm a buy signal.
+    Check if indicators confirm a buy signal (at least one enabled indicator must confirm).
     
     Args:
         indicators: Current indicator values
         use_rsi: Check RSI confirmation
         use_ema: Check EMA confirmation
         use_macd: Check MACD confirmation
-        require_all: If True, all enabled indicators must confirm.
-                    If False, at least one must confirm.
     
     Returns:
         Tuple of (confirmed: bool, reason: str, confirmation_count: int)
@@ -338,59 +459,46 @@ def check_buy_confirmation(
     """
     if indicators is None:
         return False, "No indicator data", 0
-    
+
+    rsi_ok, ema_ok, macd_ok = _confirmation_flags_buy(indicators)
     confirmations = []
     reasons = []
-    enabled_count = 0
-    
+
     if use_rsi:
-        enabled_count += 1
-        if indicators.rsi is None:
-            # Skip RSI check if not calculated (insufficient data)
+        if rsi_ok is None:
             pass
-        elif indicators.rsi_oversold or indicators.rsi < 40:
+        elif rsi_ok:
             confirmations.append(True)
             reasons.append(f"RSI={indicators.rsi:.0f} (favorable)")
         else:
             confirmations.append(False)
             reasons.append(f"RSI={indicators.rsi:.0f} (not oversold)")
-    
+
     if use_ema:
-        enabled_count += 1
-        if indicators.ema_short is None:
-            # Skip EMA check if not calculated
+        if ema_ok is None:
             pass
-        elif indicators.price_above_ema_short or indicators.ema_bullish_cross:
+        elif ema_ok:
             confirmations.append(True)
             reasons.append("EMA bullish")
         else:
             confirmations.append(False)
             reasons.append("EMA bearish")
-    
+
     if use_macd:
-        enabled_count += 1
-        if indicators.macd_histogram is None:
-            # Skip MACD check if not calculated
+        if macd_ok is None:
             pass
-        elif indicators.macd_bullish:
+        elif macd_ok:
             confirmations.append(True)
             reasons.append("MACD bullish")
         else:
             confirmations.append(False)
             reasons.append("MACD bearish")
-    
+
     if not confirmations:
-        # No indicators had enough data - skip confirmation
         return True, "Insufficient indicator data", 0
-    
-    if require_all:
-        confirmed = all(confirmations)
-    else:
-        confirmed = any(confirmations)
-    
-    # Count how many indicators confirmed
+
+    confirmed = any(confirmations)
     confirmation_count = sum(1 for c in confirmations if c)
-    
     reason = " | ".join(reasons)
     return confirmed, reason, confirmation_count
 
@@ -400,18 +508,15 @@ def check_sell_confirmation(
     use_rsi: bool = True,
     use_ema: bool = True,
     use_macd: bool = True,
-    require_all: bool = False,
 ) -> Tuple[bool, str, int]:
     """
-    Check if indicators confirm a sell signal.
+    Check if indicators confirm a sell signal (at least one enabled indicator must confirm).
     
     Args:
         indicators: Current indicator values
         use_rsi: Check RSI confirmation
         use_ema: Check EMA confirmation
         use_macd: Check MACD confirmation
-        require_all: If True, all enabled indicators must confirm.
-                    If False, at least one must confirm.
     
     Returns:
         Tuple of (confirmed: bool, reason: str, confirmation_count: int)
@@ -419,54 +524,45 @@ def check_sell_confirmation(
     """
     if indicators is None:
         return False, "No indicator data", 0
-    
+
+    rsi_ok, ema_ok, macd_ok = _confirmation_flags_sell(indicators)
     confirmations = []
     reasons = []
-    
+
     if use_rsi:
-        if indicators.rsi is None:
-            # Skip RSI check if not calculated
+        if rsi_ok is None:
             pass
-        elif indicators.rsi_overbought or indicators.rsi > 60:
+        elif rsi_ok:
             confirmations.append(True)
             reasons.append(f"RSI={indicators.rsi:.0f} (favorable)")
         else:
             confirmations.append(False)
             reasons.append(f"RSI={indicators.rsi:.0f} (not overbought)")
-    
+
     if use_ema:
-        if indicators.ema_short is None:
-            # Skip EMA check if not calculated
+        if ema_ok is None:
             pass
-        elif not indicators.price_above_ema_short or indicators.ema_bearish_cross:
+        elif ema_ok:
             confirmations.append(True)
             reasons.append("EMA bearish")
         else:
             confirmations.append(False)
             reasons.append("EMA bullish")
-    
+
     if use_macd:
-        if indicators.macd_histogram is None:
-            # Skip MACD check if not calculated
+        if macd_ok is None:
             pass
-        elif indicators.macd_bearish:
+        elif macd_ok:
             confirmations.append(True)
             reasons.append("MACD bearish")
         else:
             confirmations.append(False)
             reasons.append("MACD bullish")
-    
+
     if not confirmations:
-        # No indicators had enough data - skip confirmation
         return True, "Insufficient indicator data", 0
-    
-    if require_all:
-        confirmed = all(confirmations)
-    else:
-        confirmed = any(confirmations)
-    
-    # Count how many indicators confirmed
+
+    confirmed = any(confirmations)
     confirmation_count = sum(1 for c in confirmations if c)
-    
     reason = " | ".join(reasons)
     return confirmed, reason, confirmation_count

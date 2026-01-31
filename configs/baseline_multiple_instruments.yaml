@@ -1,5 +1,5 @@
 name: baseline
-description: Current best config. Used as baseline to compare others against.
+description: Multi-instrument baseline config
 
 indicators:
   elliott_wave:
@@ -58,7 +58,21 @@ evaluation:
 
 data:
   instruments:
-    - djia # instrument keys (e.g. djia, sp500)
+    - djia
+    # - sp500
+    - dax
+    # - clean_energy
+    # - clean_tech
+    # - emerging_markets
+    # - esg_us
+    # - eurusd
+    # - gold_physical
+    - msci_world
+    - nasdaq
+    # - nextera
+    # - silver_physical
+    # - small_cap
+    # - solar_energy
+    # - tech_sector
   start_date: '2008-01-01'
-  # end_date: '2020-01-01'
   end_date: '2012-01-01'

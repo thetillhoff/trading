@@ -9,10 +9,6 @@ import sys
 from pathlib import Path
 import pandas as pd
 
-# Add core to path
-core_dir = Path(__file__).parent.parent / "core"
-sys.path.insert(0, str(core_dir.parent))
-
 from core.data.loader import DataLoader
 from core.signals.config import StrategyConfig, BASELINE_CONFIG, PRESET_CONFIGS
 from core.signals.config_loader import load_config_from_yaml
@@ -114,11 +110,6 @@ Examples:
     
     # Signal filtering
     parser.add_argument(
-        "--require-all-indicators",
-        action="store_true",
-        help="Require all enabled indicators to confirm before generating signal"
-    )
-    parser.add_argument(
         "--use-trend-filter",
         action="store_true",
         help="Only trade in direction of EMA trend (BUY when short>long, SELL when long>short)"
@@ -209,8 +200,6 @@ Examples:
             config_dict['macd_signal'] = args.macd_signal
         
         # New feature flags
-        if args.require_all_indicators:
-            config_dict['require_all_indicators'] = args.require_all_indicators
         if args.use_trend_filter:
             config_dict['use_trend_filter'] = args.use_trend_filter
         if args.use_regime_detection:
@@ -316,22 +305,12 @@ Examples:
     reporter = ComparisonReporter(output_dir=str(output_dir))
     
     # Always generate charts and CSV
-    # Save indicators CSV (always generated)
-    indicators_csv = evaluator.save_indicators_csv(output_dir, f"indicators_{timestamp}", config=config)
+    # Save indicators CSV (always generated; includes quality_factor from result when available)
+    indicators_csv = evaluator.save_indicators_csv(output_dir, f"indicators_{timestamp}", config=config, result=result)
     if indicators_csv:
         print(f"Indicators CSV saved: {indicators_csv}")
 
-    # Generate trade timeline (shows best/worst trades for readability)
     total_trades = result.summary.total_trades
-    top_n = max(50, int(total_trades * 0.2)) if total_trades > 50 else None
-
-    timeline_path = reporter.generate_trade_timeline(
-        result, data,
-        filename=f"trade_timeline_{timestamp}.png",
-        show_annotations=True,
-        annotation_top_n=top_n,
-        max_trades=args.max_timeline_trades,
-    )
 
     # Save trades CSV with ALL trades
     trades_csv = reporter.save_trades_csv(result, filename=f"trades_full_{timestamp}.csv")
@@ -361,7 +340,6 @@ Examples:
             f.write(f"\n")
             f.write(f"FILTERS & MODULATION\n")
             f.write(f"{'-'*80}\n")
-            f.write(f"Require All Indicators: {config.require_all_indicators}\n")
             f.write(f"Trend Filter: {config.use_trend_filter}\n")
             f.write(f"Confirmation Modulation: {config.use_confirmation_modulation}\n")
             f.write(f"Confidence Sizing: {config.use_confidence_sizing}\n")
@@ -387,33 +365,105 @@ Examples:
             f.write(f"FILES GENERATED\n")
             f.write(f"{'-'*80}\n")
             f.write(f"Trades CSV: trades_full_{timestamp}.csv\n")
-            f.write(f"Trade Timeline: trade_timeline_{timestamp}.png\n")
-            f.write(f"Trade Scatter: trade_scatter_{timestamp}.png\n")
             f.write(f"Alpha Over Time: alpha_over_time_{timestamp}.png\n")
+            f.write(f"Value-gain % per instrument over time: value_gain_per_instrument_over_time_{timestamp}.png\n")
+            f.write(f"Scatter P&L%% vs Duration: scatter_pnl_pct_vs_duration_{timestamp}.png\n")
+            f.write(f"Scatter Confidence/Risk vs P&L: scatter_confidence_risk_vs_pnl_{timestamp}.png\n")
+            f.write(f"Gain per Instrument: gain_per_instrument_{timestamp}.png\n")
+            f.write(f"Trades per Instrument: trades_per_instrument_{timestamp}.png\n")
+            f.write(f"Indicator Best/Worst 20%%: indicator_best_worst_{timestamp}.png\n")
+            f.write(f"Performance timings: performance_timings_{timestamp}.png\n")
             f.write(f"Indicators CSV: indicators_{timestamp}_{timestamp}.csv\n")
     print(f"Config summary saved: {config_path}")
     
-    # Generate trade scatter plots
-    scatter_path = reporter.generate_trade_scatter_plots(
-        result,
-        filename=f"trade_scatter_{timestamp}.png",
+    # Ensure price data is a Series for charts
+    price_series = data if isinstance(data, pd.Series) else (
+        data['Close'] if 'Close' in data.columns else data.iloc[:, 0]
     )
-    
-    # Generate alpha over time chart
+    # Optional MSCI World benchmark (same date range)
+    benchmark_series = None
+    start_date = config.start_date if config_based_execution else args.start_date
+    end_date = config.end_date if config_based_execution else args.end_date
+    if start_date and end_date:
+        try:
+            msci = DataLoader.from_instrument(
+                'msci_world',
+                start_date=start_date,
+                end_date=end_date,
+                column=config.column if config_based_execution else args.column or 'Close',
+            )
+            if isinstance(msci, pd.Series):
+                benchmark_series = {'MSCI World': msci}
+            elif msci is not None and hasattr(msci, 'columns') and len(msci.columns) > 0:
+                benchmark_series = {'MSCI World': msci['Close'] if 'Close' in msci.columns else msci.iloc[:, 0]}
+        except Exception:
+            pass
+    # Per-instrument price series for gain_per_instrument (Strategy vs B&H)
+    price_data_by_instrument = {}
+    instruments_for_gain = config.instruments if config_based_execution else [args.instrument]
+    col = config.column if config_based_execution else (args.column or 'Close')
+    for inst in instruments_for_gain:
+        try:
+            s = DataLoader.from_instrument(inst, start_date=start_date, end_date=end_date, column=col)
+            if isinstance(s, pd.Series):
+                price_data_by_instrument[inst] = s
+            elif s is not None and hasattr(s, 'columns') and len(s.columns) > 0:
+                price_data_by_instrument[inst] = s['Close'] if 'Close' in s.columns else s.iloc[:, 0]
+        except Exception:
+            pass
+    # Generate alpha over time chart (cash, B&H per instrument, strategy)
     alpha_path = reporter.generate_alpha_over_time(
-        result, data,
+        result,
+        price_series,
+        price_data_by_instrument=price_data_by_instrument if price_data_by_instrument else None,
         filename=f"alpha_over_time_{timestamp}.png",
     )
-    
+    value_gain_per_inst_path = reporter.generate_value_gain_and_benchmarks(
+        result,
+        price_data=price_series,
+        benchmark_series=benchmark_series,
+        price_data_by_instrument=price_data_by_instrument if price_data_by_instrument else None,
+        filename=f"value_gain_per_instrument_over_time_{timestamp}.png",
+    )
+    scatter_duration_path = reporter.generate_pnl_vs_duration_scatter(
+        result, filename=f"scatter_pnl_pct_vs_duration_{timestamp}.png",
+    )
+    scatter_conf_path = reporter.generate_confidence_risk_vs_pnl_scatter(
+        result, filename=f"scatter_confidence_risk_vs_pnl_{timestamp}.png",
+    )
+    gain_inst_path = reporter.generate_gain_per_instrument(
+        result,
+        filename=f"gain_per_instrument_{timestamp}.png",
+        price_data_by_instrument=price_data_by_instrument if price_data_by_instrument else None,
+    )
+    trades_inst_path = reporter.generate_trades_per_instrument(
+        result, filename=f"trades_per_instrument_{timestamp}.png",
+    )
+    indicator_bw_path = reporter.generate_indicator_best_worst_overview(
+        result, filename=f"indicator_best_worst_{timestamp}.png",
+    )
+    perf_timings_path = ""
+    if getattr(result, "performance_timings", None):
+        perf_timings_path = reporter.generate_performance_timings_chart(
+            result, filename=f"performance_timings_{timestamp}.png",
+        )
     print(f"\nCharts saved to {output_dir}")
-    if timeline_path:
-        trade_count = min(args.max_timeline_trades or total_trades, total_trades)
-        print(f"  Trade timeline: {timeline_path} (best/worst {trade_count} trades)")
-    if scatter_path:
-        print(f"  Trade scatter plots: {scatter_path} (all {total_trades} trades)")
     if alpha_path:
         print(f"  Alpha over time: {alpha_path}")
-    
+    if value_gain_per_inst_path:
+        print(f"  Value-gain % per instrument over time: {value_gain_per_inst_path}")
+    if scatter_duration_path:
+        print(f"  P&L % vs duration: {scatter_duration_path}")
+    if scatter_conf_path:
+        print(f"  Confidence/risk vs P&L: {scatter_conf_path}")
+    if gain_inst_path:
+        print(f"  Gain per instrument: {gain_inst_path}")
+    if trades_inst_path:
+        print(f"  Trades per instrument: {trades_inst_path}")
+    if indicator_bw_path:
+        print(f"  Indicator best/worst 20%: {indicator_bw_path}")
+    if perf_timings_path:
+        print(f"  Performance timings: {perf_timings_path}")
     return 0
 
 

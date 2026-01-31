@@ -6,18 +6,10 @@ realistic price targets based on wave patterns.
 """
 import pandas as pd
 from typing import List, Optional
-import sys
-from pathlib import Path
 from dataclasses import replace
 
-# Add parent directories to path for imports
-current_dir = Path(__file__).parent
-project_root = current_dir.parent.parent
-core_dir = project_root / 'core'
-sys.path.insert(0, str(project_root))
-
-from core.shared.types import TradingSignal, SignalType
-from core.indicators.elliott_wave import Wave
+from ..shared.types import TradingSignal, SignalType
+from ..indicators.elliott_wave import Wave
 
 
 class TargetCalculator:

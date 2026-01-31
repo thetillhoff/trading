@@ -6,19 +6,18 @@ Treats all indicators (RSI, EMA, MACD, Elliott Wave) equally:
 - Signal generation interprets those values to create trading signals
 """
 import pandas as pd
-from typing import List, Optional, Tuple
-import sys
-from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-# Add paths for imports
-core_dir = Path(__file__).parent.parent.parent
-project_root = core_dir.parent
-sys.path.insert(0, str(project_root))
-
-from core.shared.types import SignalType, TradingSignal
-from core.shared.defaults import INDICATOR_WARMUP_PERIOD, ADX_REGIME_THRESHOLD
-from core.indicators.technical import TechnicalIndicators, IndicatorValues, check_buy_confirmation, check_sell_confirmation
-from core.indicators.elliott_wave import ElliottWaveDetector, Wave, WaveType, WaveLabel
+from ..shared.types import SignalType, TradingSignal
+from ..shared.defaults import INDICATOR_WARMUP_PERIOD, ADX_REGIME_THRESHOLD
+from ..indicators.technical import (
+    TechnicalIndicators,
+    IndicatorValues,
+    check_buy_confirmation,
+    check_sell_confirmation,
+    confirmation_weighted_score,
+)
+from ..indicators.elliott_wave import ElliottWaveDetector, Wave, WaveType, WaveLabel
 
 # Alias for backward compatibility
 Signal = TradingSignal
@@ -52,6 +51,8 @@ class SignalDetector:
             macd_fast=getattr(config, 'macd_fast', 12),
             macd_slow=getattr(config, 'macd_slow', 26),
             macd_signal=getattr(config, 'macd_signal', 12),
+            atr_period=getattr(config, 'atr_period', 14),
+            volatility_window=getattr(config, 'volatility_window', 20),
         )
         
         # Create Elliott Wave detector if enabled (shared for regular, inverted, and inverted-exit)
@@ -84,49 +85,55 @@ class SignalDetector:
         
         # Get signals from Elliott Wave (treated as indicator)
         if getattr(self.config, 'use_elliott_wave', False) and self.elliott_detector:
-            ew_signals = self._get_elliott_wave_signals(data, indicator_df)
+            ew_signals, _ = self._get_elliott_wave_signals(data, indicator_df)
             signals.extend(ew_signals)
-        
+
         # Get signals from inverted Elliott Wave: exit-only (sell-to-close) or open-short
         if getattr(self.config, 'use_elliott_wave_inverted_exit', False) and self.elliott_detector:
-            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            inverted_ew_signals, _ = self._get_inverted_elliott_wave_signals(data, indicator_df)
             for s in inverted_ew_signals:
                 if s.signal_type == SignalType.SELL:
                     s.close_long_only = True
             signals.extend(inverted_ew_signals)
         elif getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
-            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            inverted_ew_signals, _ = self._get_inverted_elliott_wave_signals(data, indicator_df)
             signals.extend(inverted_ew_signals)
-        
+
         # Filter by signal type
         signal_types = getattr(self.config, 'signal_types', 'all')
         if signal_types == "buy":
             signals = [s for s in signals if s.signal_type == SignalType.BUY]
         elif signal_types == "sell":
             signals = [s for s in signals if s.signal_type == SignalType.SELL]
-        
+
         # Sort by timestamp and remove duplicates
         signals = sorted(signals, key=lambda s: s.timestamp)
         signals = self._deduplicate_signals(signals)
-        
+
         return signals
 
-    def detect_signals_with_indicators(self, data: pd.Series) -> Tuple[List[Signal], pd.DataFrame]:
+    def detect_signals_with_indicators(
+        self,
+        data: pd.Series,
+        timings: Optional[Dict[str, float]] = None,
+    ) -> Tuple[List[Signal], pd.DataFrame, List[Wave]]:
         """
-        Detect trading signals and return both signals and indicator dataframe.
+        Detect trading signals and return signals, indicator dataframe, and waves for target calculation.
 
         Args:
             data: Price time series with datetime index
+            timings: If provided, per-indicator elapsed seconds are accumulated here
 
         Returns:
-            Tuple of (signals list, indicator dataframe)
+            Tuple of (signals list, indicator dataframe, list of Elliott waves from this run)
         """
-        signals = []
+        signals: List[Signal] = []
+        all_waves: List[Wave] = []
 
         # Calculate technical indicators
         indicator_df = None
         if self._uses_technical_indicators():
-            indicator_df = self.technical_indicators.calculate_all(data)
+            indicator_df = self.technical_indicators.calculate_all(data, timings=timings)
 
         # Get signals from technical indicators
         if self._uses_technical_indicators():
@@ -135,19 +142,22 @@ class SignalDetector:
 
         # Get signals from Elliott Wave (treated as indicator)
         if getattr(self.config, 'use_elliott_wave', False) and self.elliott_detector:
-            ew_signals = self._get_elliott_wave_signals(data, indicator_df)
+            ew_signals, ew_waves = self._get_elliott_wave_signals(data, indicator_df)
             signals.extend(ew_signals)
-        
+            all_waves.extend(ew_waves)
+
         # Get signals from inverted Elliott Wave: exit-only (sell-to-close) or open-short
         if getattr(self.config, 'use_elliott_wave_inverted_exit', False) and self.elliott_detector:
-            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            inverted_ew_signals, inv_waves = self._get_inverted_elliott_wave_signals(data, indicator_df)
             for s in inverted_ew_signals:
                 if s.signal_type == SignalType.SELL:
                     s.close_long_only = True
             signals.extend(inverted_ew_signals)
+            all_waves.extend(inv_waves)
         elif getattr(self.config, 'use_elliott_wave_inverted', False) and self.elliott_detector:
-            inverted_ew_signals = self._get_inverted_elliott_wave_signals(data, indicator_df)
+            inverted_ew_signals, inv_waves = self._get_inverted_elliott_wave_signals(data, indicator_df)
             signals.extend(inverted_ew_signals)
+            all_waves.extend(inv_waves)
 
         # Filter by signal type
         signal_types = getattr(self.config, 'signal_types', 'all')
@@ -156,11 +166,14 @@ class SignalDetector:
         elif signal_types == "sell":
             signals = [s for s in signals if s.signal_type == SignalType.SELL]
 
+        # Filter by min confirmations and min certainty (signal quality)
+        signals = self._filter_signals_by_quality(signals)
+
         # Sort by timestamp and remove duplicates
         signals = sorted(signals, key=lambda s: s.timestamp)
         signals = self._deduplicate_signals(signals)
 
-        return signals, indicator_df
+        return signals, indicator_df, all_waves
 
     def _invert_price_data(self, data: pd.Series) -> pd.Series:
         """
@@ -241,21 +254,6 @@ class SignalDetector:
             # Determine trend direction
             is_bullish_trend = ema_short > ema_long if (ema_short is not None and ema_long is not None) else None
             
-            # Apply require-all-indicators filter if enabled
-            require_all = getattr(self.config, 'require_all_indicators', False)
-            if require_all:
-                # Count how many indicators are enabled
-                enabled_count = sum([
-                    getattr(self.config, 'use_rsi', False),
-                    getattr(self.config, 'use_ema', False),
-                    getattr(self.config, 'use_macd', False),
-                ])
-                # Filter signals that don't have all indicators confirming
-                if len(buy_reasons) < enabled_count:
-                    buy_reasons = []
-                if len(sell_reasons) < enabled_count:
-                    sell_reasons = []
-            
             # Generate signals
             if buy_reasons:
                 # Apply trend filter: only generate BUY signals in bullish trend
@@ -323,17 +321,18 @@ class SignalDetector:
         self,
         data: pd.Series,
         indicator_df: Optional[pd.DataFrame] = None
-    ) -> List[Signal]:
-        """Generate signals from Elliott Wave patterns (treated as indicator)."""
-        signals = []
-        
+    ) -> Tuple[List[Signal], List[Wave]]:
+        """Generate signals from Elliott Wave patterns (treated as indicator). Returns (signals, waves)."""
+        signals: List[Signal] = []
+        waves: List[Wave] = []
+
         if not self.elliott_detector:
-            return signals
-        
+            return signals, waves
+
         # Detect waves
         min_confidence = getattr(self.config, 'min_confidence', 0.65)
         min_wave_size = getattr(self.config, 'min_wave_size', 0.03)
-        
+
         try:
             waves = self.elliott_detector.detect_waves(
                 data,
@@ -341,62 +340,57 @@ class SignalDetector:
                 min_wave_size_ratio=min_wave_size,
                 only_complete_patterns=False
             )
-        except Exception as e:
-            return signals  # Return empty on error
-        
+        except Exception:
+            return signals, waves
+
         # Generate signals from wave completions with regime detection
         for wave in waves:
             # Detect market regime at wave completion
             regime = "BEAR"  # Default to BEAR (conservative, uses original EW signals)
-            
+
             if getattr(self.config, 'use_regime_detection', False) and indicator_df is not None:
                 # Get timestamp for wave completion
                 if wave.end_idx < len(data):
                     wave_timestamp = data.index[wave.end_idx]
                     regime = self._detect_market_regime(data, indicator_df, wave_timestamp)
-            
+
             # Generate signal with regime-adapted logic
             signal = self._wave_to_signal(wave, data, indicator_df, market_regime=regime)
             if signal:
                 signals.append(signal)
-        
-        return signals
+
+        return signals, waves
     
     def _get_inverted_elliott_wave_signals(
         self,
         data: pd.Series,
         indicator_df: Optional[pd.DataFrame] = None
-    ) -> List[Signal]:
+    ) -> Tuple[List[Signal], List[Wave]]:
         """
         Generate signals from inverted Elliott Wave patterns (for sell signal generation).
-        
+        Returns (signals, waves) with waves on inverted data for target calculation.
+
         Inverts price data, runs Elliott Wave detection on inverted data, then inverts
         the signal types to generate sell signals from bearish patterns.
-        
-        Args:
-            data: Original price time series
-            indicator_df: Technical indicators dataframe (optional)
-            
-        Returns:
-            List of trading signals (inverted from detected waves)
         """
-        signals = []
-        
+        signals: List[Signal] = []
+        waves: List[Wave] = []
+
         # Run when either open-short or exit-only inverted EW is enabled
         if not (getattr(self.config, 'use_elliott_wave_inverted', False)
                 or getattr(self.config, 'use_elliott_wave_inverted_exit', False)):
-            return signals
-        
+            return signals, waves
+
         if not self.elliott_detector:
-            return signals
-        
+            return signals, waves
+
         # Invert price data
         inverted_data = self._invert_price_data(data)
-        
+
         # Detect waves on inverted data
         min_confidence = getattr(self.config, 'min_confidence_inverted', 0.65)
         min_wave_size = getattr(self.config, 'min_wave_size_inverted', 0.02)
-        
+
         try:
             waves = self.elliott_detector.detect_waves(
                 inverted_data,
@@ -404,25 +398,18 @@ class SignalDetector:
                 min_wave_size_ratio=min_wave_size,
                 only_complete_patterns=False
             )
-        except Exception as e:
-            return signals  # Return empty on error
-        
+        except Exception:
+            return signals, waves
+
         # Generate signals from inverted waves
-        # When a "buy" signal is detected on inverted data (bearish pattern),
-        # it becomes a "sell" signal in the original market
         for wave in waves:
-            # Map inverted wave to original data indices
-            # The wave indices are relative to inverted_data, but we need to map
-            # them back to the original data (indices should be the same)
             if wave.end_idx >= len(data):
                 continue
-            
-            # Convert wave to signal with inverted signal types
             signal = self._inverted_wave_to_signal(wave, data, indicator_df)
             if signal:
                 signals.append(signal)
-        
-        return signals
+
+        return signals, waves
     
     def _inverted_wave_to_signal(
         self,
@@ -494,14 +481,26 @@ class SignalDetector:
         
         # Check technical indicator confirmation if available
         if indicator_df is not None and self._uses_technical_indicators():
-            confirmed, reason, count = self._check_indicator_confirmation(
+            confirmed, reason, count, indicators = self._check_indicator_confirmation(
                 signal, indicator_df
             )
             if confirmed:
                 signal.reasoning += f" | {reason}"
                 signal.indicator_confirmations = count
                 signal.source = "combined_inverted"
-        
+            weights = getattr(self.config, 'indicator_weights', None)
+            if weights and indicators is not None:
+                score = confirmation_weighted_score(
+                    indicators,
+                    use_rsi=getattr(self.config, 'use_rsi', False),
+                    use_ema=getattr(self.config, 'use_ema', False),
+                    use_macd=getattr(self.config, 'use_macd', False),
+                    weights=weights,
+                    for_buy=(signal.signal_type == SignalType.BUY),
+                )
+                if score is not None:
+                    signal.confirmation_score = score
+
         return signal
     
     def _wave_to_signal(
@@ -558,8 +557,11 @@ class SignalDetector:
             # Non-impulse waves not used for signals
             return None
         
-        # Apply regime-based signal inversion
-        invert_signals = getattr(self.config, 'use_regime_detection', False)
+        # Apply regime-based signal inversion (configurable; avoid silent no-ops)
+        invert_signals = (
+            getattr(self.config, 'use_regime_detection', False)
+            and getattr(self.config, 'invert_signals_in_bull', True)
+        )
         
         if invert_signals and market_regime == "BULL":
             # In BULL markets, invert signals:
@@ -593,68 +595,88 @@ class SignalDetector:
         
         # Check technical indicator confirmation if available
         if indicator_df is not None and self._uses_technical_indicators():
-            confirmed, reason, count = self._check_indicator_confirmation(
+            confirmed, reason, count, indicators = self._check_indicator_confirmation(
                 signal, indicator_df
             )
             if confirmed:
                 signal.reasoning += f" | {reason}"
                 signal.indicator_confirmations = count
                 signal.source = "combined"
-        
+            weights = getattr(self.config, 'indicator_weights', None)
+            if weights and indicators is not None:
+                score = confirmation_weighted_score(
+                    indicators,
+                    use_rsi=getattr(self.config, 'use_rsi', False),
+                    use_ema=getattr(self.config, 'use_ema', False),
+                    use_macd=getattr(self.config, 'use_macd', False),
+                    weights=weights,
+                    for_buy=(signal.signal_type == SignalType.BUY),
+                )
+                if score is not None:
+                    signal.confirmation_score = score
+
         return signal
-    
+
     def _check_indicator_confirmation(
         self,
         signal: Signal,
         indicator_df: pd.DataFrame,
-    ) -> Tuple[bool, str, int]:
-        """Check if technical indicators confirm a signal."""
+    ) -> Tuple[bool, str, int, Optional[IndicatorValues]]:
+        """Check if technical indicators confirm a signal. Returns (confirmed, reason, count, indicators)."""
         if signal.timestamp not in indicator_df.index:
             idx = indicator_df.index.get_indexer([signal.timestamp], method='ffill')[0]
             if idx < 0:
-                return False, "No indicator data", 0
+                return False, "No indicator data", 0, None
             timestamp = indicator_df.index[idx]
         else:
             timestamp = signal.timestamp
-        
+
         row = indicator_df.loc[timestamp]
-        
-        # Build indicator values
+
+        def _nan(x, default=None):
+            return default if (x is None or pd.isna(x)) else x
         indicators = IndicatorValues(
             timestamp=timestamp,
             price=row['price'],
-            rsi=row['rsi'] if not pd.isna(row['rsi']) else None,
-            rsi_oversold=row['rsi_oversold'] if not pd.isna(row['rsi_oversold']) else False,
-            rsi_overbought=row['rsi_overbought'] if not pd.isna(row['rsi_overbought']) else False,
-            ema_short=row['ema_short'] if not pd.isna(row['ema_short']) else None,
-            ema_long=row['ema_long'] if not pd.isna(row['ema_long']) else None,
-            price_above_ema_short=row['price_above_ema_short'] if not pd.isna(row['price_above_ema_short']) else False,
-            price_above_ema_long=row['price_above_ema_long'] if not pd.isna(row['price_above_ema_long']) else False,
-            ema_bullish_cross=row['ema_bullish_cross'] if not pd.isna(row['ema_bullish_cross']) else False,
-            ema_bearish_cross=row['ema_bearish_cross'] if not pd.isna(row['ema_bearish_cross']) else False,
-            macd_line=row['macd_line'] if not pd.isna(row['macd_line']) else None,
-            macd_signal=row['macd_signal'] if not pd.isna(row['macd_signal']) else None,
-            macd_histogram=row['macd_histogram'] if not pd.isna(row['macd_histogram']) else None,
-            macd_bullish=row['macd_bullish'] if not pd.isna(row['macd_bullish']) else False,
-            macd_bearish=row['macd_bearish'] if not pd.isna(row['macd_bearish']) else False,
+            rsi=_nan(row['rsi']),
+            rsi_oversold=bool(_nan(row['rsi_oversold'], False)),
+            rsi_overbought=bool(_nan(row['rsi_overbought'], False)),
+            ema_short=_nan(row['ema_short']),
+            ema_long=_nan(row['ema_long']),
+            price_above_ema_short=bool(_nan(row['price_above_ema_short'], False)),
+            price_above_ema_long=bool(_nan(row['price_above_ema_long'], False)),
+            ema_bullish_cross=bool(_nan(row['ema_bullish_cross'], False)),
+            ema_bearish_cross=bool(_nan(row['ema_bearish_cross'], False)),
+            macd_line=_nan(row['macd_line']),
+            macd_signal=_nan(row['macd_signal']),
+            macd_histogram=_nan(row['macd_histogram']),
+            macd_bullish=bool(_nan(row['macd_bullish'], False)),
+            macd_bearish=bool(_nan(row['macd_bearish'], False)),
+            atr=_nan(row.get('atr')),
+            atr_pct=_nan(row.get('atr_pct')),
+            volatility_20=_nan(row.get('volatility_20')),
         )
-        
+
+        # Volatility filter: skip confirmation when 20d vol exceeds threshold
+        if getattr(self.config, 'use_volatility_filter', False) and indicators.volatility_20 is not None:
+            vol_max = getattr(self.config, 'volatility_max', 0.02)
+            if indicators.volatility_20 > vol_max:
+                return False, f"Volatility too high ({indicators.volatility_20:.4f} > {vol_max})", 0, indicators
+
+        use_rsi = getattr(self.config, 'use_rsi', False)
+        use_ema = getattr(self.config, 'use_ema', False)
+        use_macd = getattr(self.config, 'use_macd', False)
+
         if signal.signal_type == SignalType.BUY:
-            return check_buy_confirmation(
-                indicators,
-                use_rsi=getattr(self.config, 'use_rsi', False),
-                use_ema=getattr(self.config, 'use_ema', False),
-                use_macd=getattr(self.config, 'use_macd', False),
-                require_all=getattr(self.config, 'require_all_indicators', False),
+            confirmed, reason, count = check_buy_confirmation(
+                indicators, use_rsi=use_rsi, use_ema=use_ema, use_macd=use_macd
             )
         else:
-            return check_sell_confirmation(
-                indicators,
-                use_rsi=getattr(self.config, 'use_rsi', False),
-                use_ema=getattr(self.config, 'use_ema', False),
-                use_macd=getattr(self.config, 'use_macd', False),
-                require_all=getattr(self.config, 'require_all_indicators', False),
+            confirmed, reason, count = check_sell_confirmation(
+                indicators, use_rsi=use_rsi, use_ema=use_ema, use_macd=use_macd
             )
+
+        return confirmed, reason, count, indicators
     
     def _detect_market_regime(
         self,
@@ -663,7 +685,7 @@ class SignalDetector:
         timestamp: pd.Timestamp
     ) -> str:
         """
-        Detect market regime at given timestamp using ADX and MA slope.
+        Detect market regime at given timestamp using a selectable regime model.
         
         Args:
             data: Price series
@@ -675,29 +697,94 @@ class SignalDetector:
             "BEAR" - Strong downtrend (ADX > 30, MA slope negative) or weak trend
             "SIDEWAYS" - Choppy/ranging market (ADX < 30)
         """
+        mode = getattr(self.config, "regime_mode", "adx_ma")
+        if mode == "trend_vol":
+            return self._detect_market_regime_trend_vol(indicator_df, timestamp)
+
+        # Default / backward-compatible
+        return self._detect_market_regime_adx_ma(indicator_df, timestamp)
+
+    def _detect_market_regime_adx_ma(
+        self,
+        indicator_df: pd.DataFrame,
+        timestamp: pd.Timestamp,
+    ) -> str:
+        """ADX + MA-slope regime classifier (legacy)."""
         # Default to BEAR (conservative - use original EW signals)
         if timestamp not in indicator_df.index:
             return "BEAR"
-        
+
         row = indicator_df.loc[timestamp]
         adx = row.get('adx', 0)
         ma_slope = row.get('ma_slope', 0)
-        
+
         # Handle missing/NaN values
         if pd.isna(adx) or pd.isna(ma_slope):
             return "BEAR"
-        
-        # Regime detection logic:
+
         # Strong trend (ADX > threshold) + direction from MA slope
         adx_threshold = getattr(self.config, 'adx_threshold', ADX_REGIME_THRESHOLD)
         if adx > adx_threshold:
-            if ma_slope > 0:
-                return "BULL"  # Strong bull trend
-            else:
-                return "BEAR"  # Strong bear trend
-        else:
-            # Weak trend - treat as SIDEWAYS (choppy, use original EW signals)
+            return "BULL" if ma_slope > 0 else "BEAR"
+
+        # Weak trend - treat as SIDEWAYS (choppy, use original EW signals)
+        return "SIDEWAYS"
+
+    def _detect_market_regime_trend_vol(
+        self,
+        indicator_df: pd.DataFrame,
+        timestamp: pd.Timestamp,
+    ) -> str:
+        """
+        Close-only regime classifier using MA slope + return volatility.
+
+        Intent:
+        - classify obvious trends via (abs(ma_slope)/price) threshold
+        - treat low-slope environments as SIDEWAYS
+        - conservatively avoid classifying as BULL in high volatility
+        """
+        if timestamp not in indicator_df.index:
+            return "BEAR"
+
+        row = indicator_df.loc[timestamp]
+        price = row.get("price", None)
+        ma_slope = row.get("ma_slope", 0.0)
+        vol = row.get("volatility_20", 0.0)
+
+        if price is None or pd.isna(price) or pd.isna(ma_slope):
+            return "BEAR"
+
+        slope_threshold = getattr(self.config, "regime_slope_threshold", 0.0005)
+        slope_ratio = abs(ma_slope) / price if price else 0.0
+        if slope_ratio < slope_threshold:
             return "SIDEWAYS"
+
+        regime = "BULL" if ma_slope > 0 else "BEAR"
+
+        vol_threshold = getattr(self.config, "regime_vol_threshold", 0.015)
+        if regime == "BULL" and vol is not None and not pd.isna(vol) and vol > vol_threshold:
+            return "SIDEWAYS"
+
+        return regime
+
+    def _filter_signals_by_quality(self, signals: List[Signal]) -> List[Signal]:
+        """Keep only signals meeting min_confirmations and min_certainty (if set)."""
+        min_confirmations = getattr(self.config, 'min_confirmations', None)
+        min_certainty = getattr(self.config, 'min_certainty', None)
+        if min_confirmations is None and min_certainty is None:
+            return signals
+        filtered = []
+        for s in signals:
+            ok_conf = min_confirmations is None or getattr(s, 'indicator_confirmations', 0) >= min_confirmations
+            effective_certainty = (
+                s.confirmation_score
+                if getattr(s, 'confirmation_score', None) is not None
+                else getattr(s, 'indicator_confirmations', 0) / 3.0
+            )
+            ok_cert = min_certainty is None or effective_certainty >= min_certainty
+            if ok_conf and ok_cert:
+                filtered.append(s)
+        return filtered
     
     def _deduplicate_signals(self, signals: List[Signal]) -> List[Signal]:
         """Remove duplicate signals on the same day."""

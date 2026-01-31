@@ -6,14 +6,169 @@ Generates comparison reports and visualizations for walk-forward evaluation resu
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple, Callable
 from pathlib import Path
 from datetime import datetime
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
-from core.evaluation.walk_forward import WalkForwardResult
-from core.signals.config import StrategyConfig
-from core.evaluation.portfolio import PositionStatus
+from ..evaluation.walk_forward import WalkForwardResult
+from ..signals.config import StrategyConfig
+from ..evaluation.portfolio import PositionStatus
+
+# Daily rate for 2% p.a. compound: (1.02)^(1/365.25) - 1 so that interest compounds to 2% per year
+CASH_DAILY_RATE_2PA = (1.02 ** (1 / 365.25)) - 1
+
+
+@dataclass
+class AlphaOverTimeSeries:
+    """Computed series for alpha-over-time chart (cash, B&H, strategy, alpha)."""
+    common_index: pd.DatetimeIndex
+    cash_only_returns_pct: List[float]
+    bh_returns_pct: pd.Series
+    bh_series_by_inst: Dict[str, pd.Series]
+    strategy_returns_pct_aligned: np.ndarray
+    alpha_dates: List
+    alpha_over_time: List[float]
+    interest_rate_pa: float
+
+
+def compute_alpha_over_time_series(
+    result: WalkForwardResult,
+    price_data: pd.Series,
+    price_data_by_instrument: Optional[Dict[str, pd.Series]] = None,
+) -> Optional[AlphaOverTimeSeries]:
+    """
+    Compute series for alpha-over-time (cash only, B&H, strategy, alpha). No chart.
+    Returns None on early exit (no result, no wallet_history, empty eval_data, no B&H, empty alpha).
+    """
+    if not result or not result.simulation.wallet_history:
+        return None
+
+    eval_start = result.evaluation_start_date
+    eval_end = result.evaluation_end_date
+    initial_capital = result.simulation.initial_capital
+    interest_rate_pa = getattr(result.config, 'interest_rate_pa', 0.02)
+    daily_rate = _daily_rate_from_pa(interest_rate_pa)
+
+    eval_data = price_data[
+        (price_data.index >= eval_start) &
+        (price_data.index <= eval_end)
+    ]
+    if len(eval_data) == 0:
+        return None
+    common_index = eval_data.index
+
+    cash_only_values = []
+    cash_balance = initial_capital
+    accrued = 0.0
+    prev_date = None
+    for current_date in common_index:
+        if _is_new_month(current_date, prev_date):
+            cash_balance += accrued
+            accrued = 0.0
+        days = 1 if prev_date is None else (current_date - prev_date).days
+        if days > 0:
+            accrued += cash_balance * (daily_rate * days)
+        cash_only_values.append(cash_balance)
+        prev_date = current_date
+    cash_only_returns_pct = [((v - initial_capital) / initial_capital) * 100 for v in cash_only_values]
+
+    bh_series_by_inst: Dict[str, pd.Series] = {}
+    if price_data_by_instrument:
+        instruments_ordered = [k for k in (getattr(result.config, 'instruments', None) or []) if k in price_data_by_instrument]
+        if not instruments_ordered:
+            instruments_ordered = sorted(price_data_by_instrument.keys())
+        for inst in instruments_ordered:
+            ser = price_data_by_instrument.get(inst)
+            if ser is None or len(ser) == 0:
+                continue
+            filt = ser[(ser.index >= eval_start) & (ser.index <= eval_end)]
+            if len(filt) == 0:
+                continue
+            reindexed = filt.reindex(common_index).ffill().bfill()
+            if reindexed.isna().all():
+                continue
+            ip = float(reindexed.iloc[0])
+            if ip <= 0:
+                continue
+            bh_val = reindexed * (initial_capital / ip)
+            bh_returns_pct_inst = ((bh_val - initial_capital) / initial_capital) * 100
+            bh_series_by_inst[inst] = bh_returns_pct_inst
+        bh_returns_pct = bh_series_by_inst[instruments_ordered[0]] if instruments_ordered and instruments_ordered[0] in bh_series_by_inst else None
+    else:
+        initial_price = eval_data.iloc[0]
+        bh_shares = initial_capital / initial_price
+        bh_values = eval_data * bh_shares
+        bh_returns_pct = ((bh_values - initial_capital) / initial_capital) * 100
+        bh_series_by_inst = {'Buy-and-Hold': bh_returns_pct}
+
+    if bh_returns_pct is None:
+        return None
+
+    wallet_history = result.simulation.wallet_history
+    portfolio_dates = [w.timestamp for w in wallet_history]
+    interest_account = 0.0
+    accrued = 0.0
+    strategy_values = []
+    prev_date = None
+    for date, wallet_state in zip(portfolio_dates, wallet_history):
+        if _is_new_month(date, prev_date):
+            interest_account += accrued
+            accrued = 0.0
+        days = 1 if prev_date is None else (date - prev_date).days
+        if days > 0 and (wallet_state.cash + interest_account) > 0:
+            accrued += (wallet_state.cash + interest_account) * (daily_rate * days)
+        strategy_values.append(wallet_state.total_value + interest_account)
+        prev_date = date
+    strategy_returns_pct = [((v - initial_capital) / initial_capital) * 100 for v in strategy_values]
+
+    strategy_series = pd.Series(strategy_returns_pct, index=pd.DatetimeIndex(portfolio_dates))
+    strategy_aligned = strategy_series.reindex(common_index, method='ffill')
+    strategy_aligned = strategy_aligned.fillna(0.0)
+    strategy_returns_pct_aligned = strategy_aligned.values
+
+    alpha_over_time = []
+    alpha_dates = []
+    bh_arr = np.asarray(bh_returns_pct)
+    for date, strategy_return in zip(portfolio_dates, strategy_returns_pct):
+        try:
+            date_for_lookup = pd.Timestamp(date) if not isinstance(date, pd.Timestamp) else date
+            bh_idx = common_index.get_indexer([date_for_lookup], method='nearest')[0]
+            if 0 <= bh_idx < len(bh_arr):
+                bh_return_at_date = bh_arr[bh_idx]
+                alpha_over_time.append(strategy_return - bh_return_at_date)
+                alpha_dates.append(date)
+        except (IndexError, KeyError):
+            continue
+    if len(alpha_over_time) == 0:
+        return None
+
+    return AlphaOverTimeSeries(
+        common_index=common_index,
+        cash_only_returns_pct=cash_only_returns_pct,
+        bh_returns_pct=bh_returns_pct,
+        bh_series_by_inst=bh_series_by_inst,
+        strategy_returns_pct_aligned=strategy_returns_pct_aligned,
+        alpha_dates=alpha_dates,
+        alpha_over_time=alpha_over_time,
+        interest_rate_pa=interest_rate_pa,
+    )
+
+
+def _daily_rate_from_pa(interest_rate_pa: float) -> float:
+    """Convert annual interest rate (e.g. 0.02 for 2% p.a.) to daily compound rate. 0 -> 0."""
+    if interest_rate_pa <= 0:
+        return 0.0
+    return (1.0 + interest_rate_pa) ** (1 / 365.25) - 1.0
+
+
+def _is_new_month(current_date, prev_date):
+    """True if current_date is in a different month/year than prev_date."""
+    if prev_date is None:
+        return False
+    return (getattr(current_date, 'month', current_date.month), getattr(current_date, 'year', current_date.year)) != (
+        getattr(prev_date, 'month', prev_date.month), getattr(prev_date, 'year', prev_date.year)
+    )
 
 
 def trades_to_dataframe(result: WalkForwardResult) -> pd.DataFrame:
@@ -55,8 +210,10 @@ def trades_to_dataframe(result: WalkForwardResult) -> pd.DataFrame:
             'risk_reward_ratio': pos.risk_reward_ratio,
             'projection_price': pos.projection_price if pos.projection_price else '',
             'position_size_method': pos.position_size_method,
+            'quality_factor': getattr(pos, 'quality_factor', None),
             'trend_filter_active': pos.trend_filter_active,
             'trend_direction': pos.trend_direction,
+            'instrument': pos.instrument if pos.instrument else '',
         })
     return pd.DataFrame(rows)
 
@@ -848,167 +1005,88 @@ class ComparisonReporter:
         self,
         result: WalkForwardResult,
         price_data: pd.Series,
+        price_data_by_instrument: Optional[Dict[str, pd.Series]] = None,
         filename: Optional[str] = None,
     ) -> str:
         """
         Generate a chart showing alpha over time.
 
-        Shows three return baselines:
-        - Cash Only: 2% p.a. with monthly compounding
-        - Buy-and-Hold: 100% invested in market
-        - Strategy: Active trading with cash earning 2% p.a.
-
-        Alpha measures strategy performance vs buy-and-hold.
+        Top: Cumulative returns (Cash only, buy-and-hold per instrument, Strategy).
+        Middle: Market exposure (% of portfolio invested).
+        Bottom: Active alpha (strategy vs first instrument buy-and-hold).
 
         Args:
             result: Walk-forward evaluation result
-            price_data: Historical price data for the evaluation period
+            price_data: Historical price data for the evaluation period (first instrument when multi)
+            price_data_by_instrument: Optional dict instrument -> price series for B&H per instrument
             filename: Output filename (default: auto-generated)
 
         Returns:
             Path to the generated chart
         """
-        if not result or not result.simulation.wallet_history:
+        series = compute_alpha_over_time_series(result, price_data, price_data_by_instrument)
+        if series is None:
             return ""
-        
-        # Filter price data to evaluation period
-        eval_data = price_data[
-            (price_data.index >= result.evaluation_start_date) &
-            (price_data.index <= result.evaluation_end_date)
-        ]
-        
-        if len(eval_data) == 0:
-            return ""
-        
-        # Calculate baseline returns
-        initial_price = eval_data.iloc[0]
-        initial_capital = result.simulation.initial_capital
 
-        # Buy-and-hold: invest all capital at start
-        bh_shares = initial_capital / initial_price
-        bh_values = eval_data * bh_shares
-        bh_returns_pct = ((bh_values - initial_capital) / initial_capital) * 100
+        common_index = series.common_index
+        cash_only_returns_pct = series.cash_only_returns_pct
+        bh_series_by_inst = series.bh_series_by_inst
+        strategy_returns_pct_aligned = series.strategy_returns_pct_aligned
+        alpha_dates = series.alpha_dates
+        alpha_over_time = series.alpha_over_time
+        interest_rate_pa = series.interest_rate_pa
 
-        # Cash only: all capital earns 2% p.a. with monthly compounding
-        monthly_cash_rate = 0.02 / 12  # 2% annual / 12 months
-        cash_only_values = []
-        cash_balance = initial_capital
-        prev_date = eval_data.index[0]
-
-        for current_date in eval_data.index:
-            months_elapsed = (current_date - prev_date).days / 30.44  # Average days per month
-            if months_elapsed > 0:
-                # Apply monthly compounding for the elapsed months
-                for _ in range(int(months_elapsed)):
-                    cash_balance *= (1 + monthly_cash_rate)
-                # Apply partial month if needed
-                partial_month = months_elapsed - int(months_elapsed)
-                if partial_month > 0:
-                    cash_balance *= (1 + monthly_cash_rate * partial_month)
-
-            cash_only_values.append(cash_balance)
-            prev_date = current_date
-
-        cash_only_returns_pct = [((v - initial_capital) / initial_capital) * 100 for v in cash_only_values]
-
-        # Strategy portfolio values over time
         wallet_history = result.simulation.wallet_history
-        portfolio_values = [w.total_value for w in wallet_history]
-        portfolio_dates = [w.timestamp for w in wallet_history]
-        
-        # Calculate strategy returns (portfolio + cash earning 2% p.a.)
-        # The wallet_history already contains total_value (cash + invested_value)
-        # We need to ADD interest earned on the cash portion on top of that
-        
-        monthly_cash_rate = 0.02 / 12  # 2% annual / 12 months
-        
-        # Track accumulated interest on cash over time
-        accumulated_interest = 0.0
-        strategy_values = []
-        
-        prev_date = portfolio_dates[0] if portfolio_dates else None
-        
-        for i, (date, wallet_state) in enumerate(zip(portfolio_dates, wallet_history)):
-            # Base portfolio value (from simulation)
-            base_value = wallet_state.total_value
-            
-            # Calculate interest on cash since last period
-            if i > 0 and prev_date is not None:
-                # Get cash balance from previous period
-                prev_cash = wallet_history[i-1].cash
-                
-                # Calculate interest earned on that cash
-                days_elapsed = (date - prev_date).days
-                if days_elapsed > 0 and prev_cash > 0:
-                    # Daily rate from 2% annual
-                    daily_rate = 0.02 / 365.25
-                    interest_earned = prev_cash * (daily_rate * days_elapsed)
-                    accumulated_interest += interest_earned
-            
-            # Strategy value = portfolio value + accumulated interest
-            strategy_value = base_value + accumulated_interest
-            strategy_values.append(strategy_value)
-            
-            prev_date = date
-        
-        # Convert to percentage returns
-        strategy_returns_pct = [((v - initial_capital) / initial_capital) * 100 for v in strategy_values]
-        
-        # Calculate alpha over time (strategy return - buy-and-hold return)
-        alpha_over_time = []
-        alpha_dates = []
-        for date, strategy_return in zip(portfolio_dates, strategy_returns_pct):
-            # Find corresponding buy-and-hold return at this date
-            try:
-                if isinstance(date, pd.Timestamp):
-                    date_for_lookup = date
-                else:
-                    date_for_lookup = pd.Timestamp(date)
+        exposure_dates = [w.timestamp for w in wallet_history]
+        exposure_pct = [
+            (w.invested_value / w.total_value * 100) if w.total_value and w.total_value > 0 else 0.0
+            for w in wallet_history
+        ]
 
-                bh_idx = eval_data.index.get_indexer([date_for_lookup], method='nearest')[0]
-                if bh_idx >= 0 and bh_idx < len(bh_returns_pct):
-                    bh_return_at_date = bh_returns_pct.iloc[bh_idx]
-                    alpha = strategy_return - bh_return_at_date
-                    alpha_over_time.append(alpha)
-                    alpha_dates.append(date)
-            except (IndexError, KeyError):
-                # Skip if we can't find matching date
-                continue
-        
-        if len(alpha_over_time) == 0:
-            return ""
-        
-        # Create figure with two subplots
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10))
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(16, 14))
         fig.suptitle(
             f'Alpha Over Time: {result.config.name} | Final Alpha: {result.active_alpha:.2f}%',
             fontsize=14, fontweight='bold'
         )
-        
-        # Plot 1: Returns comparison
-        ax1.plot(eval_data.index, cash_only_returns_pct, label='Cash Only (2% p.a.)', color='gray', linewidth=2, alpha=0.7)
-        ax1.plot(eval_data.index, bh_returns_pct, label='Buy-and-Hold', color='blue', linewidth=2, alpha=0.7)
-        ax1.plot(portfolio_dates, strategy_returns_pct, label='Strategy (Cash earns 2% p.a.)', color='green', linewidth=2, alpha=0.7)
+
+        # Plot 1: Cash only, buy-and-hold per instrument, strategy
+        cash_label = f'Cash Only ({interest_rate_pa * 100:.1f}% p.a.)'
+        strategy_label = f'Strategy (Cash earns {interest_rate_pa * 100:.1f}% p.a.)'
+        ax1.plot(common_index, cash_only_returns_pct, label=cash_label, color='gray', linewidth=2, alpha=0.7)
+        colors = plt.cm.tab10(np.linspace(0, 1, max(len(bh_series_by_inst), 1)))
+        for idx, (inst, bh_series) in enumerate(bh_series_by_inst.items()):
+            ax1.plot(common_index, bh_series.values, label=f'B&H {inst}', color=colors[idx % len(colors)], linewidth=2, alpha=0.7)
+        ax1.plot(common_index, strategy_returns_pct_aligned, label=strategy_label, color='green', linewidth=2, alpha=0.7)
         ax1.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
         ax1.set_xlabel('Date', fontsize=10)
         ax1.set_ylabel('Return (%)', fontsize=10)
         ax1.set_title('Cumulative Returns: Cash vs Buy-and-Hold vs Strategy', fontsize=12, fontweight='bold')
         ax1.legend(fontsize=9, loc='best')
         ax1.grid(True, alpha=0.3)
-        
-        # Plot 2: Alpha over time
-        ax2.plot(alpha_dates, alpha_over_time, label='Active Alpha', color='purple', linewidth=2, alpha=0.8)
-        ax2.axhline(y=0, color='black', linestyle='--', linewidth=2, alpha=0.5, label='Buy-and-Hold (α=0)')
-        ax2.fill_between(alpha_dates, 0, alpha_over_time, where=(np.array(alpha_over_time) >= 0), 
-                         alpha=0.3, color='green', label='Positive Alpha')
-        ax2.fill_between(alpha_dates, 0, alpha_over_time, where=(np.array(alpha_over_time) < 0), 
-                         alpha=0.3, color='red', label='Negative Alpha')
+
+        # Plot 2: Market exposure (% of portfolio invested)
+        ax2.plot(exposure_dates, exposure_pct, label='Market exposure', color='steelblue', linewidth=2, alpha=0.8)
+        ax2.fill_between(exposure_dates, 0, exposure_pct, alpha=0.3, color='steelblue')
+        ax2.set_ylim(0, max(100, max(exposure_pct) * 1.05) if exposure_pct else 100)
         ax2.set_xlabel('Date', fontsize=10)
-        ax2.set_ylabel('Alpha (%)', fontsize=10)
-        ax2.set_title('Active Alpha: Strategy vs Buy-and-Hold', fontsize=12, fontweight='bold')
+        ax2.set_ylabel('Exposure (%)', fontsize=10)
+        ax2.set_title('Market Exposure: % of Portfolio Invested', fontsize=12, fontweight='bold')
         ax2.legend(fontsize=9, loc='best')
         ax2.grid(True, alpha=0.3)
-        
+
+        # Plot 3: Alpha over time
+        ax3.plot(alpha_dates, alpha_over_time, label='Active Alpha', color='purple', linewidth=2, alpha=0.8)
+        ax3.axhline(y=0, color='black', linestyle='--', linewidth=2, alpha=0.5, label='Buy-and-Hold (α=0)')
+        ax3.fill_between(alpha_dates, 0, alpha_over_time, where=(np.array(alpha_over_time) >= 0),
+                         alpha=0.3, color='green', label='Positive Alpha')
+        ax3.fill_between(alpha_dates, 0, alpha_over_time, where=(np.array(alpha_over_time) < 0),
+                         alpha=0.3, color='red', label='Negative Alpha')
+        ax3.set_xlabel('Date', fontsize=10)
+        ax3.set_ylabel('Alpha (%)', fontsize=10)
+        ax3.set_title('Active Alpha: Strategy vs Buy-and-Hold', fontsize=12, fontweight='bold')
+        ax3.legend(fontsize=9, loc='best')
+        ax3.grid(True, alpha=0.3)
+
         # Add summary text
         final_alpha = alpha_over_time[-1] if alpha_over_time else 0
         max_alpha = max(alpha_over_time) if alpha_over_time else 0
@@ -1018,10 +1096,10 @@ class ComparisonReporter:
             f"Max: {max_alpha:.2f}% | "
             f"Min: {min_alpha:.2f}%"
         )
-        ax2.text(0.02, 0.02, summary_text, transform=ax2.transAxes,
+        ax3.text(0.02, 0.02, summary_text, transform=ax3.transAxes,
                 fontsize=9, verticalalignment='bottom',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9))
-        
+
         plt.tight_layout()
         
         # Save chart
@@ -1034,7 +1112,550 @@ class ComparisonReporter:
         plt.close()
         
         return str(output_path)
-    
+
+    def generate_market_exposure(
+        self,
+        result: WalkForwardResult,
+        filename: Optional[str] = None,
+    ) -> str:
+        """
+        Single chart: percentage of portfolio invested in the market over time.
+        """
+        if not result or not result.simulation.wallet_history:
+            return ""
+        wallet_history = result.simulation.wallet_history
+        exposure_dates = [w.timestamp for w in wallet_history]
+        exposure_pct = [
+            (w.invested_value / w.total_value * 100) if w.total_value and w.total_value > 0 else 0.0
+            for w in wallet_history
+        ]
+        fig, ax = plt.subplots(figsize=(14, 5))
+        ax.plot(exposure_dates, exposure_pct, label='Market exposure', color='steelblue', linewidth=2, alpha=0.8)
+        ax.fill_between(exposure_dates, 0, exposure_pct, alpha=0.3, color='steelblue')
+        ax.set_ylim(0, max(100, max(exposure_pct) * 1.05) if exposure_pct else 100)
+        ax.set_xlabel('Date', fontsize=10)
+        ax.set_ylabel('Exposure (%)', fontsize=10)
+        ax.set_title(f'Market Exposure: % of Portfolio Invested — {result.config.name}', fontsize=12, fontweight='bold')
+        ax.legend(loc='best', fontsize=9)
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        if filename is None:
+            filename = f"market_exposure_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return str(output_path)
+
+    def generate_value_gain_and_benchmarks(
+        self,
+        result: WalkForwardResult,
+        price_data: Optional[pd.Series] = None,
+        benchmark_series: Optional[Dict[str, pd.Series]] = None,
+        price_data_by_instrument: Optional[Dict[str, pd.Series]] = None,
+        filename: Optional[str] = None,
+    ) -> str:
+        """
+        Top: cumulative value-gain % from conducted trades per instrument over time (one line per instrument).
+        Bottom (if price_data_by_instrument): buy-and-hold return % per instrument (same as alpha_over_time), same colors.
+        """
+        if not result or not result.simulation.wallet_history:
+            return ""
+        closed = [p for p in result.simulation.positions if p.exit_timestamp and p.cost_basis > 0]
+        wallet_history = result.simulation.wallet_history
+        portfolio_dates = [w.timestamp for w in wallet_history]
+        if not portfolio_dates:
+            return ""
+        by_inst: Dict[str, List[Tuple[pd.Timestamp, float]]] = {}
+        for p in closed:
+            inst = p.instrument if p.instrument else 'unknown'
+            pnl_pct = (p.pnl / p.cost_basis * 100) if p.cost_basis > 0 else 0.0
+            by_inst.setdefault(inst, []).append((p.exit_timestamp, pnl_pct))
+        for inst in by_inst:
+            by_inst[inst].sort(key=lambda x: x[0])
+        instruments = sorted(by_inst.keys())
+        if not instruments:
+            return ""
+        colors = plt.cm.tab10(np.linspace(0, 1, max(len(instruments), 1)))
+        has_market = bool(price_data_by_instrument)
+        n_rows = 2 if has_market else 1
+        fig, axes = plt.subplots(n_rows, 1, figsize=(14, 6 * n_rows), sharex=True)
+        axes = np.atleast_1d(axes)
+        ax_top = axes[0]
+        for i, inst in enumerate(instruments):
+            cum = 0.0
+            cum_series = []
+            idx = 0
+            trades = by_inst[inst]
+            for date in portfolio_dates:
+                while idx < len(trades) and trades[idx][0] <= date:
+                    cum += trades[idx][1]
+                    idx += 1
+                cum_series.append(cum)
+            ax_top.plot(
+                portfolio_dates, cum_series, label=inst, linewidth=2, alpha=0.8, color=colors[i % len(colors)]
+            )
+        ax_top.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+        ax_top.set_ylabel('Cumulative value-gain % from trades')
+        ax_top.set_title(f'Value-gain % from trades per instrument: {result.config.name}')
+        ax_top.legend(loc='best', fontsize=9)
+        ax_top.grid(True, alpha=0.3)
+
+        if has_market:
+            ax_bottom = axes[1]
+            all_dates = pd.DatetimeIndex([])
+            for inst, ser in price_data_by_instrument.items():
+                if ser is not None and len(ser) > 0:
+                    all_dates = all_dates.union(ser.index)
+            if len(all_dates) == 0:
+                ax_bottom.set_visible(False)
+            else:
+                all_dates = all_dates.sort_values()
+                for i, inst in enumerate(instruments):
+                    ser = price_data_by_instrument.get(inst)
+                    if ser is None or len(ser) == 0:
+                        continue
+                    reindexed = ser.reindex(all_dates).ffill().bfill()
+                    if reindexed.isna().all():
+                        continue
+                    base = float(reindexed.iloc[0])
+                    if base <= 0:
+                        continue
+                    return_pct = (reindexed / base - 1) * 100
+                    ax_bottom.plot(
+                        all_dates, return_pct.values, label=inst, linewidth=2, alpha=0.8, color=colors[i % len(colors)]
+                    )
+                ax_bottom.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+                ax_bottom.set_xlabel('Date')
+                ax_bottom.set_ylabel('Buy-and-hold return (%)')
+                ax_bottom.set_title('Market (buy-and-hold) return % per instrument')
+                ax_bottom.legend(loc='best', fontsize=9)
+                ax_bottom.grid(True, alpha=0.3)
+        else:
+            axes[0].set_xlabel('Date')
+
+        plt.tight_layout()
+        if filename is None:
+            filename = f"value_gain_per_instrument_over_time_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return str(output_path)
+
+    def generate_pnl_vs_duration_scatter(
+        self,
+        result: WalkForwardResult,
+        filename: Optional[str] = None,
+    ) -> str:
+        """Scatter: pnl% vs duration of each trade (closed positions only)."""
+        if not result or not result.simulation.positions:
+            return ""
+        closed = [p for p in result.simulation.positions if p.exit_timestamp and p.entry_timestamp]
+        if not closed:
+            return ""
+        durations = [(p.exit_timestamp - p.entry_timestamp).days for p in closed]
+        pnl_pcts = [(p.pnl / p.cost_basis * 100) if p.cost_basis > 0 else 0.0 for p in closed]
+        colors = ['green' if p > 0 else 'red' for p in pnl_pcts]
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(durations, pnl_pcts, c=colors, alpha=0.6, s=30, edgecolors='darkgray')
+        ax.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+        ax.set_xlabel('Duration (days)')
+        ax.set_ylabel('P&L %')
+        ax.set_title(f'P&L % vs Duration: {result.config.name}')
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        if filename is None:
+            filename = f"scatter_pnl_pct_vs_duration_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return str(output_path)
+
+    def generate_confidence_risk_vs_pnl_scatter(
+        self,
+        result: WalkForwardResult,
+        filename: Optional[str] = None,
+    ) -> str:
+        """Scatter: certainty vs pnl% and risk (e.g. risk_reward_ratio) vs pnl% (two subplots)."""
+        if not result or not result.simulation.positions:
+            return ""
+        closed = [p for p in result.simulation.positions if p.exit_timestamp]
+        if not closed:
+            return ""
+        pnl_pcts = [(p.pnl / p.cost_basis * 100) if p.cost_basis > 0 else 0.0 for p in closed]
+        certainties = [p.certainty for p in closed]
+        risks = [p.risk_reward_ratio if p.risk_reward_ratio else 0.0 for p in closed]
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        ax1.scatter(certainties, pnl_pcts, alpha=0.6, s=30, c='steelblue', edgecolors='darkgray')
+        ax1.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+        ax1.set_xlabel('Certainty at entry')
+        ax1.set_ylabel('P&L %')
+        ax1.set_title('Certainty vs P&L %')
+        ax1.grid(True, alpha=0.3)
+        ax2.scatter(risks, pnl_pcts, alpha=0.6, s=30, c='teal', edgecolors='darkgray')
+        ax2.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+        ax2.set_xlabel('Risk/reward ratio')
+        ax2.set_ylabel('P&L %')
+        ax2.set_title('Risk vs P&L %')
+        ax2.grid(True, alpha=0.3)
+        fig.suptitle(f'Confidence/Risk vs P&L: {result.config.name}', fontsize=12, fontweight='bold')
+        plt.tight_layout()
+        if filename is None:
+            filename = f"scatter_confidence_risk_vs_pnl_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return str(output_path)
+
+    def generate_gain_per_instrument(
+        self,
+        result: WalkForwardResult,
+        filename: Optional[str] = None,
+        price_data_by_instrument: Optional[Dict[str, pd.Series]] = None,
+    ) -> str:
+        """Bar chart: strategy total gain % vs buy-and-hold return % per instrument (grouped bars)."""
+        if not result or not result.simulation.positions:
+            return ""
+        closed = [p for p in result.simulation.positions if p.exit_timestamp and p.cost_basis > 0]
+        if not closed:
+            return ""
+        by_inst: Dict[str, List[float]] = {}
+        for p in closed:
+            inst = p.instrument if p.instrument else 'unknown'
+            by_inst.setdefault(inst, []).append(p.pnl / p.cost_basis * 100)
+        instruments = sorted(by_inst.keys())
+        strategy_gains = [sum(by_inst[inst]) for inst in instruments]
+        start_date = result.evaluation_start_date
+        end_date = result.evaluation_end_date
+        bh_returns: Optional[List[Optional[float]]] = None
+        if price_data_by_instrument and start_date is not None and end_date is not None:
+            bh_returns = []
+            for inst in instruments:
+                series = price_data_by_instrument.get(inst)
+                if series is None or len(series) < 2:
+                    bh_returns.append(None)
+                    continue
+                mask = (series.index >= start_date) & (series.index <= end_date)
+                sub = series.loc[mask]
+                if len(sub) < 2:
+                    bh_returns.append(None)
+                    continue
+                p0 = float(sub.iloc[0])
+                p1 = float(sub.iloc[-1])
+                if p0 <= 0:
+                    bh_returns.append(None)
+                    continue
+                bh_returns.append((p1 - p0) / p0 * 100)
+        fig, ax = plt.subplots(figsize=(max(8, len(instruments) * 1.2), 5))
+        x = np.arange(len(instruments))
+        width = 0.35
+        ax.bar(x - width / 2, strategy_gains, width, label='Strategy', color='steelblue', alpha=0.7)
+        if bh_returns is not None:
+            bh_vals = [b if b is not None else np.nan for b in bh_returns]
+            ax.bar(x + width / 2, bh_vals, width, label='B&H', color='orange', alpha=0.7)
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1)
+        ax.set_xticks(x)
+        ax.set_xticklabels(instruments, rotation=45, ha='right')
+        ax.set_xlabel('Instrument')
+        ax.set_ylabel('Return %')
+        ax.set_title(f'Strategy vs Buy-and-Hold return % per Instrument: {result.config.name}')
+        ax.legend()
+        ax.grid(True, alpha=0.3, axis='y')
+        plt.tight_layout()
+        if filename is None:
+            filename = f"gain_per_instrument_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return str(output_path)
+
+    def generate_trades_per_instrument(
+        self,
+        result: WalkForwardResult,
+        filename: Optional[str] = None,
+    ) -> str:
+        """Bar chart: total, winning, and losing trade counts per instrument (grouped bars)."""
+        if not result or not result.simulation.positions:
+            return ""
+        closed = [p for p in result.simulation.positions if p.exit_timestamp]
+        if not closed:
+            return ""
+        by_inst: Dict[str, Dict[str, int]] = {}
+        for p in closed:
+            inst = p.instrument if p.instrument else 'unknown'
+            if inst not in by_inst:
+                by_inst[inst] = {'total': 0, 'winning': 0, 'losing': 0}
+            by_inst[inst]['total'] += 1
+            if p.pnl > 0:
+                by_inst[inst]['winning'] += 1
+            else:
+                by_inst[inst]['losing'] += 1
+        instruments = sorted(by_inst.keys())
+        totals = [by_inst[inst]['total'] for inst in instruments]
+        winnings = [by_inst[inst]['winning'] for inst in instruments]
+        losings = [by_inst[inst]['losing'] for inst in instruments]
+        fig, ax = plt.subplots(figsize=(max(8, len(instruments) * 1.2), 5))
+        x = np.arange(len(instruments))
+        width = 0.25
+        ax.bar(x - width, totals, width, label='Total', color='steelblue', alpha=0.7)
+        ax.bar(x, winnings, width, label='Winning', color='green', alpha=0.7)
+        ax.bar(x + width, losings, width, label='Losing', color='red', alpha=0.7)
+        ax.set_xticks(x)
+        ax.set_xticklabels(instruments, rotation=45, ha='right')
+        ax.set_xlabel('Instrument')
+        ax.set_ylabel('Trade count')
+        ax.set_title(f'Trades per Instrument (total / winning / losing): {result.config.name}')
+        ax.legend()
+        ax.grid(True, alpha=0.3, axis='y')
+        plt.tight_layout()
+        if filename is None:
+            filename = f"trades_per_instrument_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return str(output_path)
+
+    def _line_panel_from_continuous(
+        self,
+        getter: Callable[[object], Optional[float]],
+        closed: list,
+        pnl_pcts: list,
+        n_bins: int,
+        value_range: Optional[Tuple[float, float]] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Build binned (bin_centers, mean_pnls, counts) for a continuous indicator.
+        getter(pos) returns value or None. value_range=(vmin,vmax) => equal-width bins; else percentile-based.
+        Returns empty arrays if fewer than 2 valid pairs."""
+        pairs: List[Tuple[float, float]] = []
+        for i, p in enumerate(closed):
+            if i >= len(pnl_pcts):
+                break
+            v = getter(p)
+            if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
+                continue
+            try:
+                pairs.append((float(v), float(pnl_pcts[i])))
+            except (TypeError, ValueError, IndexError):
+                pass
+        if len(pairs) < 2:
+            return np.array([]), np.array([]), np.array([])
+        values = np.array([x[0] for x in pairs])
+        pnls = np.array([x[1] for x in pairs])
+        n_bins = min(n_bins, max(5, len(pairs) // 3))
+        if value_range is not None:
+            vmin, vmax = value_range
+            edges = np.linspace(vmin, vmax, n_bins + 1)
+        else:
+            edges = np.percentile(values, np.linspace(0, 100, n_bins + 1))
+            edges[0] = min(edges[0], values.min() - 1e-9)
+            edges[-1] = max(edges[-1], values.max() + 1e-9)
+        bin_idx = np.clip(np.digitize(values, edges, right=False) - 1, 0, n_bins - 1)
+        centers: List[float] = []
+        means: List[float] = []
+        counts: List[int] = []
+        for j in range(n_bins):
+            mask = bin_idx == j
+            if not np.any(mask):
+                continue
+            centers.append((float(edges[j]) + float(edges[j + 1])) / 2)
+            means.append(float(np.mean(pnls[mask])))
+            counts.append(int(np.sum(mask)))
+        return np.array(centers), np.array(means), np.array(counts)
+
+    def _add_line_panel(
+        self,
+        ax,
+        bin_centers: np.ndarray,
+        mean_pnls: np.ndarray,
+        counts: np.ndarray,
+        xlabel: str,
+        title: str,
+    ) -> None:
+        """Plot mean P&L vs bin center as line, zero line, labels. Title can include N trades."""
+        if len(bin_centers) == 0:
+            return
+        ax.plot(bin_centers, mean_pnls, marker='o', linestyle='-', color='steelblue', markersize=4)
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel('Mean P&L % at exit')
+        n_trades = int(counts.sum()) if len(counts) else 0
+        ax.set_title(f'{title} (N={n_trades})' if n_trades else title)
+        ax.grid(True, alpha=0.3, axis='y')
+
+    def generate_indicator_best_worst_overview(
+        self,
+        result: WalkForwardResult,
+        filename: Optional[str] = None,
+    ) -> str:
+        """Panels: (1) mean P&L % per instrument; (2) by confirmation count (bars);
+        (3–8) by certainty, RSI, EMA short, EMA long, MACD hist, MACD signal as line (binned mean P&L vs value)."""
+        if not result or not result.simulation.positions:
+            return ""
+        closed = [p for p in result.simulation.positions if p.exit_timestamp and p.cost_basis > 0]
+        if not closed:
+            return ""
+        pnl_pcts = [(p.pnl / p.cost_basis * 100) if p.cost_basis > 0 else 0.0 for p in closed]
+        by_inst: Dict[str, List[float]] = {}
+        for p, pct in zip(closed, pnl_pcts):
+            inst = p.instrument if p.instrument else 'unknown'
+            by_inst.setdefault(inst, []).append(pct)
+        instruments = sorted(by_inst.keys())
+        mean_pnls_inst = [float(np.mean(by_inst[inst])) for inst in instruments]
+
+        # By confirmation count (1, 2, 3)
+        by_conf: Dict[int, List[float]] = {}
+        for p, pct in zip(closed, pnl_pcts):
+            c = getattr(p, 'indicator_confirmations', None)
+            if c is not None:
+                try:
+                    k = int(c)
+                    by_conf.setdefault(k, []).append(pct)
+                except (TypeError, ValueError):
+                    pass
+        conf_counts = sorted(by_conf.keys())
+        mean_pnls_conf = [float(np.mean(by_conf[k])) for k in conf_counts]
+        conf_labels = [str(k) for k in conf_counts]
+
+        # Line panels: certainty, RSI, EMA short, EMA long, MACD hist, MACD signal (binned mean P&L vs value)
+        cert_centers, cert_means, cert_counts = self._line_panel_from_continuous(
+            lambda p: getattr(p, 'certainty', None), closed, pnl_pcts, n_bins=18, value_range=(0.0, 1.0)
+        )
+        rsi_centers, rsi_means, rsi_counts = self._line_panel_from_continuous(
+            lambda p: getattr(p, 'rsi_value', None), closed, pnl_pcts, n_bins=12, value_range=(0.0, 100.0)
+        )
+        ema_short_centers, ema_short_means, ema_short_counts = self._line_panel_from_continuous(
+            lambda p: getattr(p, 'ema_short', None), closed, pnl_pcts, n_bins=12, value_range=None
+        )
+        ema_long_centers, ema_long_means, ema_long_counts = self._line_panel_from_continuous(
+            lambda p: getattr(p, 'ema_long', None), closed, pnl_pcts, n_bins=12, value_range=None
+        )
+        macd_hist_centers, macd_hist_means, macd_hist_counts = self._line_panel_from_continuous(
+            lambda p: getattr(p, 'macd_histogram', None), closed, pnl_pcts, n_bins=10, value_range=None
+        )
+        macd_sig_centers, macd_sig_means, macd_sig_counts = self._line_panel_from_continuous(
+            lambda p: getattr(p, 'macd_signal', None), closed, pnl_pcts, n_bins=10, value_range=None
+        )
+
+        n_rows = 1
+        n_rows += 1 if conf_labels else 0
+        n_rows += 1 if len(cert_centers) else 0
+        n_rows += 1 if len(rsi_centers) else 0
+        n_rows += 1 if len(ema_short_centers) else 0
+        n_rows += 1 if len(ema_long_centers) else 0
+        n_rows += 1 if len(macd_hist_centers) else 0
+        n_rows += 1 if len(macd_sig_centers) else 0
+        fig, axes = plt.subplots(
+            n_rows, 1,
+            figsize=(max(8, len(instruments) * 1.2), 4 * n_rows),
+        )
+        axes = np.atleast_1d(axes)
+        ax_idx = 0
+
+        def _add_bar_panel(ax, labels: List[str], means: List[float], title: str):
+            x = np.arange(len(labels))
+            colors = ['green' if m >= 0 else 'red' for m in means]
+            ax.bar(x, means, color=colors, alpha=0.7)
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels, rotation=25, ha='right')
+            ax.axhline(y=0, color='black', linestyle='-', linewidth=1)
+            ax.set_ylabel('Mean P&L % at exit')
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3, axis='y')
+
+        x1 = np.arange(len(instruments))
+        colors1 = ['green' if m >= 0 else 'red' for m in mean_pnls_inst]
+        axes[ax_idx].bar(x1, mean_pnls_inst, color=colors1, alpha=0.7)
+        axes[ax_idx].set_xticks(x1)
+        axes[ax_idx].set_xticklabels(instruments, rotation=45, ha='right')
+        axes[ax_idx].axhline(y=0, color='black', linestyle='-', linewidth=1)
+        axes[ax_idx].set_ylabel('Mean P&L % at exit')
+        axes[ax_idx].set_title('Mean P&L % at exit per Instrument')
+        axes[ax_idx].grid(True, alpha=0.3, axis='y')
+        ax_idx += 1
+
+        if conf_labels:
+            _add_bar_panel(axes[ax_idx], [f'{lb} conf' for lb in conf_labels], mean_pnls_conf, 'Mean P&L % by Confirmation Count (what confirmations suggested)')
+            ax_idx += 1
+
+        if len(cert_centers):
+            self._add_line_panel(axes[ax_idx], cert_centers, cert_means, cert_counts, 'Certainty', 'Mean P&L % by Certainty (what certainty suggested)')
+            ax_idx += 1
+        if len(rsi_centers):
+            self._add_line_panel(axes[ax_idx], rsi_centers, rsi_means, rsi_counts, 'RSI at entry', 'Mean P&L % by RSI at entry (what RSI suggested)')
+            ax_idx += 1
+        if len(ema_short_centers):
+            self._add_line_panel(axes[ax_idx], ema_short_centers, ema_short_means, ema_short_counts, 'EMA short at entry', 'Mean P&L % by EMA short at entry (what EMA short suggested)')
+            ax_idx += 1
+        if len(ema_long_centers):
+            self._add_line_panel(axes[ax_idx], ema_long_centers, ema_long_means, ema_long_counts, 'EMA long at entry', 'Mean P&L % by EMA long at entry (what EMA long suggested)')
+            ax_idx += 1
+        if len(macd_hist_centers):
+            self._add_line_panel(axes[ax_idx], macd_hist_centers, macd_hist_means, macd_hist_counts, 'MACD histogram at entry', 'Mean P&L % by MACD histogram at entry (what MACD hist suggested)')
+            ax_idx += 1
+        if len(macd_sig_centers):
+            self._add_line_panel(axes[ax_idx], macd_sig_centers, macd_sig_means, macd_sig_counts, 'MACD signal at entry', 'Mean P&L % by MACD signal at entry (what MACD signal suggested)')
+            ax_idx += 1
+
+        fig.suptitle(f'{result.config.name} — Actual trade success vs what indicators suggested', fontsize=12, fontweight='bold')
+        plt.tight_layout()
+        if filename is None:
+            filename = f"indicator_best_worst_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return str(output_path)
+
+    def generate_performance_timings_chart(
+        self,
+        result: WalkForwardResult,
+        filename: Optional[str] = None,
+    ) -> str:
+        """Bar chart of computation time by phase and per-indicator (seconds)."""
+        timings = getattr(result, 'performance_timings', None) if result else None
+        if not timings:
+            return ""
+        phase_keys = ["data_load", "signal_detection", "portfolio_simulation"]
+        phases = [(k, timings[k]) for k in phase_keys if k in timings]
+        indicator_items = [(k.replace("indicator_", ""), timings[k]) for k in sorted(timings) if k.startswith("indicator_")]
+        n_phase = len(phases)
+        n_ind = len(indicator_items)
+        if n_phase == 0 and n_ind == 0:
+            return ""
+        n_rows = (1 if n_phase else 0) + (1 if n_ind else 0)
+        fig, axes = plt.subplots(n_rows, 1, figsize=(max(8, (n_phase + n_ind) * 0.8), 4 * n_rows))
+        axes = np.atleast_1d(axes)
+        ax_idx = 0
+        if phases:
+            ax = axes[ax_idx]
+            ax_idx += 1
+            labels = [p[0].replace("_", " ") for p in phases]
+            vals = [p[1] for p in phases]
+            x = np.arange(len(labels))
+            ax.bar(x, vals, color="steelblue", alpha=0.8)
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels, rotation=25, ha="right")
+            ax.set_ylabel("Time (s)")
+            ax.set_title("Computation time by phase")
+            ax.grid(True, alpha=0.3, axis="y")
+        if indicator_items:
+            ax = axes[ax_idx]
+            labels = [p[0].replace("_", " ") for p in indicator_items]
+            vals = [p[1] for p in indicator_items]
+            x = np.arange(len(labels))
+            ax.bar(x, vals, color="seagreen", alpha=0.8)
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels, rotation=25, ha="right")
+            ax.set_ylabel("Time (s)")
+            ax.set_title("Computation time per indicator (cumulative)")
+            ax.grid(True, alpha=0.3, axis="y")
+        fig.suptitle(f"{result.config.name} – performance", fontsize=11, fontweight="bold")
+        plt.tight_layout()
+        if filename is None:
+            filename = f"performance_timings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close()
+        return str(output_path)
+
     def generate_equity_curve(
         self,
         results: List[WalkForwardResult],
@@ -1448,7 +2069,6 @@ class ComparisonReporter:
                 'risk_reward': config.risk_reward,
                 'position_size_pct': config.position_size_pct,
                 'max_positions': config.max_positions,
-                'confidence_size_multiplier': config.confidence_size_multiplier,
             }
             data.append(row)
         
@@ -1483,7 +2103,6 @@ class ComparisonReporter:
                 ('risk_reward', 'Risk/Reward Ratio'),
                 ('position_size_pct', 'Position Size %'),
                 ('max_positions', 'Max Positions'),
-                ('confidence_size_multiplier', 'Confidence Multiplier'),
             ]),
         ]
         
@@ -1647,7 +2266,6 @@ class ComparisonReporter:
                 'risk_reward': config.risk_reward,
                 'position_size_pct': config.position_size_pct,
                 'max_positions': config.max_positions,
-                'confidence_size_multiplier': config.confidence_size_multiplier,
             }
             data.append(row)
         
@@ -1677,7 +2295,6 @@ class ComparisonReporter:
                 ('risk_reward', 'Risk/Reward Ratio'),
                 ('position_size_pct', 'Position Size %'),
                 ('max_positions', 'Max Positions'),
-                ('confidence_size_multiplier', 'Confidence Multiplier'),
             ]),
         ]
         
@@ -1779,21 +2396,22 @@ class ComparisonReporter:
         # Create date index
         date_index = pd.date_range(start=start_date, end=end_date, freq='D')
         
-        # Calculate 2%pa benchmark (monthly compounding)
+        interest_rate_pa = getattr(first_result.config, 'interest_rate_pa', 0.02)
+        daily_rate = _daily_rate_from_pa(interest_rate_pa)
+        # Cash benchmark: interest calculated daily, payout (compound) at end of each month
         initial_capital = first_result.simulation.initial_capital
-        monthly_rate = 0.02 / 12
-        cash_returns = []
         cash_balance = initial_capital
-        prev_date = date_index[0]
-        
+        accrued = 0.0
+        prev_date = None
+        cash_returns = []
         for date in date_index:
-            months_elapsed = (date - prev_date).days / 30.44
-            if months_elapsed > 0:
-                for _ in range(int(months_elapsed)):
-                    cash_balance *= (1 + monthly_rate)
-                partial = months_elapsed - int(months_elapsed)
-                if partial > 0:
-                    cash_balance *= (1 + monthly_rate * partial)
+            if _is_new_month(date, prev_date):
+                cash_balance += accrued
+                accrued = 0.0
+            days = 1 if prev_date is None else (date - prev_date).days
+            if days > 0:
+                accrued += cash_balance * (daily_rate * days)
+            # Display balance only (accrued not in account until month-end); monthly steps
             cash_returns.append(((cash_balance - initial_capital) / initial_capital) * 100)
             prev_date = date
         
@@ -1801,7 +2419,7 @@ class ComparisonReporter:
         # We need to load price data to calculate the actual buy-and-hold curve
         # Use the first result's config to get instrument and load data
         try:
-            from core.data.loader import DataLoader
+            from ..data.loader import DataLoader
             config = first_result.config
             instrument = config.instruments[0] if config.instruments else "djia"
             
@@ -1847,27 +2465,39 @@ class ComparisonReporter:
         # Build equity curves for each strategy
         fig, ax = plt.subplots(figsize=(16, 10))
         
-        # Plot 2%pa benchmark
-        ax.plot(date_index, cash_returns, label='2% p.a. Benchmark', color='gray', linewidth=2, linestyle='--', alpha=0.7)
+        cash_bench_label = f'{interest_rate_pa * 100:.1f}% p.a. Benchmark'
+        ax.plot(date_index, cash_returns, label=cash_bench_label, color='gray', linewidth=2, linestyle='--', alpha=0.7)
         
         # Plot buy-and-hold
         ax.plot(date_index, bh_returns, label=f'Buy-and-Hold ({bh_gain:.1f}%)', color='blue', linewidth=2, alpha=0.7)
         
-        # Plot each strategy
+        # Plot each strategy (cash earns interest; display value = total_value + interest_account only, monthly steps)
         colors = plt.cm.tab10(range(len(display_results)))
         for i, result in enumerate(display_results):
             if not result.simulation.wallet_history:
                 continue
-            
-            # Extract returns over time
+            interest_rate_pa_r = getattr(result.config, 'interest_rate_pa', 0.02)
+            daily_rate_strat = _daily_rate_from_pa(interest_rate_pa_r)
+            initial_cap = result.simulation.initial_capital
             wallet_history = result.simulation.wallet_history
             strategy_dates = [w.timestamp for w in wallet_history]
-            strategy_returns = [w.return_pct for w in wallet_history]
-            
-            # Interpolate to match date_index
-            strategy_series = pd.Series(strategy_returns, index=strategy_dates)
+            interest_account = 0.0
+            accrued = 0.0
+            prev_date = None
+            strategy_values = []
+            for date, wallet_state in zip(strategy_dates, wallet_history):
+                if _is_new_month(date, prev_date):
+                    interest_account += accrued
+                    accrued = 0.0
+                days = 1 if prev_date is None else (date - prev_date).days
+                if days > 0 and (wallet_state.cash + interest_account) > 0:
+                    accrued += (wallet_state.cash + interest_account) * (daily_rate_strat * days)
+                # Display total_value + interest_account only (accrued not in account until month-end); monthly steps
+                strategy_values.append(wallet_state.total_value + interest_account)
+                prev_date = date
+            strategy_returns_pct = [((v - initial_cap) / initial_cap) * 100 for v in strategy_values]
+            strategy_series = pd.Series(strategy_returns_pct, index=pd.DatetimeIndex(strategy_dates))
             strategy_aligned = strategy_series.reindex(date_index, method='ffill').fillna(0.0)
-            
             alpha = getattr(result, 'active_alpha', result.outperformance)
             label = f"{result.config.name[:25]} (α={alpha:+.1f}%)"
             ax.plot(date_index, strategy_aligned.values, label=label, color=colors[i], linewidth=1.5, alpha=0.8)
@@ -1875,7 +2505,7 @@ class ComparisonReporter:
         ax.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.3)
         ax.set_xlabel('Date', fontsize=12)
         ax.set_ylabel('Cumulative Return (%)', fontsize=12)
-        ax.set_title(f'Multi-Strategy Equity Curve vs 2% p.a. Benchmark (Top {len(display_results)})', 
+        ax.set_title(f'Multi-Strategy Equity Curve vs {interest_rate_pa * 100:.1f}% p.a. Benchmark (Top {len(display_results)})', 
                      fontsize=14, fontweight='bold')
         ax.legend(fontsize=9, loc='best', ncol=2)
         ax.grid(True, alpha=0.3)
@@ -2113,7 +2743,6 @@ class ComparisonReporter:
                 'risk_reward': config.risk_reward,
                 'position_size_pct': config.position_size_pct,
                 'max_positions': config.max_positions,
-                'confidence_size_multiplier': config.confidence_size_multiplier,
             }
             data.append(row)
         
@@ -2145,7 +2774,6 @@ class ComparisonReporter:
                 ('risk_reward', 'Risk/Reward Ratio'),
                 ('position_size_pct', 'Position Size %'),
                 ('max_positions', 'Max Positions'),
-                ('confidence_size_multiplier', 'Confidence Multiplier'),
             ]),
         ]
         
@@ -2273,10 +2901,8 @@ class ComparisonReporter:
             Path to the generated CSV
         """
         df = trades_to_dataframe(result)
-        if df.empty:
-            return ""
 
-        # Save CSV
+        # Save CSV (always write, even when empty, so the file exists and lists 0 trades)
         if filename is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"trades_{result.config.name}_{timestamp}.csv"

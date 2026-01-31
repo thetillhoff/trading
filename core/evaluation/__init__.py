@@ -9,6 +9,7 @@ from .portfolio import PortfolioSimulator, SimulationResult, Position, PositionS
 from .trade_analysis import (
     aggregate_positions_by_signal_type,
     aggregate_trades_dataframe_by_signal_type,
+    analyze_pretrade_predictors,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     'PositionStatus',
     'aggregate_positions_by_signal_type',
     'aggregate_trades_dataframe_by_signal_type',
+    'analyze_pretrade_predictors',
 ]

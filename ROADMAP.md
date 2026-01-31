@@ -10,82 +10,91 @@ dotcom_crash: "2000-01-01 - 2003-01-01"
 bear_market_long: "2000-01-01 - 2010-01-01"
 bull_market_long: "2010-01-01 - 2020-01-01"
 
-For comprehensive hypothesis testing results, strategy comparisons, and detailed performance analysis, see [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md).
+Evidence for hypotheses and baseline: [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md).
+Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 
 ---
 
 ## Next Steps (Priority Order)
 
-Evidence for completed work is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md).
-
 ### High Priority
 
-- **Pre-trade analysis**: Are there indications on the trades that mark them as more probable to succeed or fail, before the trade is executed?
-- **Time-based trade constraints:** Min-holding time per trade, time-based stops (exit after N days).
-- **Implement Elliott Wave Enhancements**: Implement each of the enhancements to the Elliott Wave indicator mentioned further below.
+- **restructure signals configuration**: Use a single configuration for indicators. If an indicator should be used, it has to be configured; if it's missing, it's not used. A minimal configuration contains at least a weight for the indicator and the necessary parameters. Filtering is via weighted score or min_confirmations/min_certainty.
 
-### Medium Priority - Strategy
+- **asset analysis:**
+  - Create a separate project for asset analysis. It's meant to find the best assets/instruments to use for trading.
+  - Retrieve list of available assets/instruments and their metadata.
+  - Retrieve data of available assets/instruments and analyze them.
+  - Try to find common patterns and relationships between them.
+  - Analyze their metadata, like market cap, company size, company ratings, etc.
+  The goal is to identify metrics what makes an asset/instrument a good candidate for trading.
+  And to prepare to add many more assets/instruments to the trading strategy.
 
-- **Regime redesign or removal:** ADX regime (25–40) shows no benefit (HYPOTHESIS_TEST_RESULTS). Try different regime logic (e.g. volatility, range vs trend) or remove.
-- **Inverted Elliott Wave:** Does not improve alpha (HYPOTHESIS_TEST_RESULTS). Optional: investigate root cause or remove feature.
+- **implement IBKR API**: Implement the IBKR API to get real-time data and execute trades. Sandbox first.
 
-### Regime Detection Enhancements
+- **implement Alpaca API**: Implement the Alpaca API to get real-time data and execute trades. Sandbox first.
 
-- **Flexible Regime Detection:** More regime types beyond bull/bear
-  - High volatility / low volatility
-  - Range-bound / trending
-  - Custom regime definitions
-- **Regime-Specific Strategies:** Different strategies per regime
-- **Volatility-detection:** Add volatility-based indicator for risk assessment and position sizing and confirmation of a trade.
+### Medium Priority – Strategy and execution
 
-- **Restructure indicator usage:** Enable config files to pick any indicator combination for any assessment metric, like risk, confidence, position size, stop loss, ..., with (multiplicative) weighting of each indicator.
+- **Exchange Traded Commodities:** Implement Exchange Traded Commodities (ETCs) as instruments. Add a few big ones, but only the physically backed ones.
 
-### Medium Priority - Risk Management
+- **Time-based trade constraints:** Min-holding time per trade; time-based stops (exit after N days).
+- **Indicator usage beyond confirmation:** Extend weighting to risk/stop-loss or other metrics (confirmation weighting already in baseline).
 
-- **Custom Signal Rules:** Configurable signal rules without code changes
-  - Rule engine for flexible signal generation
-  - Min confirmations parameter (not just boolean require_all)
-  - Indicator weights/priorities
-  - Signal strength scoring (quantify signal quality beyond binary)
-- **Config Splitting:** Break StrategyConfig into sub-configs within the same file
-  - ExecutionConfig (walk-forward, lookback, step days, ...)
-  - IndicatorConfig (RSI, EMA, MACD, Elliott parameters, ...)
-  - RiskConfig (position sizing, stops, risk/reward, ...)
-- **Advanced position sizing:** Kelly, min/max limits, risk-per-trade limits, rebalancing. Additive confidence sizing is optimal (HYPOTHESIS_TEST_RESULTS); open: test max_positions at 0.5–0.7 if constraint ever binds.
+- **Hypothesis: Signal quality on full period (2000–2020):** Same signal_quality / conf×cert configs with start 2000, end 2020; confirm optimal min_certainty / min_confirmations over longer span.
+- **Hypothesis: Multi-instrument with min_certainty:** Compare baseline multi-instrument vs variants with min_certainty 0.5 / 0.66; does selectivity improve multi-instrument results?
+
+### Medium Priority – Config and code quality
+
+- **Independent review with fresh AI agent:**
+  - Review the code and tests specifically, but also this whole repository. Among regular review things, ensure the code and tests are correct, make sense and follow best practices. Examples:
+    - Find unused code, make targets, tests, etc.
+    - Suggest code- & test- & all other noteworthy improvements.
+    - Suggest simplifications.
+    - Suggest performance improvements.
+    - Suggest new features.
+    - Suggest strategy improvements.
+    - Suggest improvements to AGENTS.md and DEVELOPMENT.md and the other markdown files.
+  - Add your findings in this ROADMAP.md file.
+  - "Clean up"/improve docstrings right away.
+
+- **Custom signal rules:** Configurable rules without code changes; rule engine; indicator weights/priorities (partially covered by signal quality above).
+- **Config splitting:** Break StrategyConfig into sub-configs (Execution, Indicator, Risk) in the same file.
+- **Config validation:** Validate at creation (e.g. EMA short < long, valid ranges); fail fast with clear errors.
+- **Logging:** Replace prints with a proper logging framework.
+
+### Medium Priority – Elliott Wave
+
+- **Stricter pattern rules:** Wave 4 cannot overlap Wave 1; Wave 3 not shortest; validate internal structure.
+- **Multi-timeframe:** Detect on daily, confirm on weekly.
+
+### Medium Priority – Risk and metrics
+
 - **Risk-adjusted metrics:** Sharpe/Sortino, max drawdown, rolling window.
-- **Logging:** Replace prints with proper logging framework
+- **Advanced position sizing (optional):** Kelly, min/max limits, risk-per-trade; additive confidence is optimal so far; test max_positions when constraint binds (e.g. 0.5–0.7).
+
+### Lower Priority – Regime (only if revisited)
+
+- **Regime:** Current ADX/trend_vol regime rejected. "Flexible regime" (e.g. vol/range/trend) or regime-specific strategies only if we revisit regime with a new design.
+
+### Lower Priority – Volatility
+
+- **Volatility sizing:** Test volatility-based position sizing (ATR/price) if desired; filter was rejected, sizing untested.
+
+### Lower Priority – CoT (Commitment of Traders)
+
+- **CoT indicators:** Implement CoT as optional confirmation and verify usefulness. **Context:** CFTC weekly report of long/short positions (commercial vs speculator); often used as “smart money” or contrarian signal. **Limitations:** CoT applies only to futures—requires instrument→CFTC contract mapping (e.g. gold, eurusd); data is weekly (align to daily via ffill); separate data source and cache (CFTC CSV/API); not applicable to equity indices (djia, sp500) unless mapped to a futures contract (e.g. E-mini). Lower priority until other strategy/config work is done.
 
 ---
 
 ## Elliott Wave Enhancements
 
-### 1. Wave-Specific Targets
-
-- **Wave 3:** 1.618-2.618× Wave 1
-- **Wave 5:** Equal to Wave 1 or 0.618× Wave 3
-- **Wave C:** Equal to Wave A or 1.618× Wave A
-
-### 2. Stricter Pattern Rules (reduce false signals)
-
-- Wave 4 cannot overlap Wave 1
-- Wave 3 must not be shortest
-- Validate internal structure
-
-### 3. Parameter Optimization
-
+- **Stricter pattern rules (reduce false signals):** Wave 4 cannot overlap Wave 1; Wave 3 must not be shortest; validate internal structure.
 - **Multi-timeframe:** Detect on daily, confirm on weekly.
 
+---
+
 ## Future Enhancements (Lower Priority)
-
-### Configuration & Extensibility
-
-- **Trading Cost Configuration:**
-  - Add % trade fee option in config
-  - Add absolute trade fee option in config
-  - Commission/slippage modeling for realistic backtesting
-- **Interest/Cash Management:**
-  - Add option in config to configure interest %/pa non-invested money earns (calculate on daily basis)
-  - Verify if 2%pa line has compound interest yet (also the non-invested money should earn interest on its interest)
 
 ### Performance Metrics & Reporting
 
@@ -98,15 +107,7 @@ Evidence for completed work is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_R
   - Multiple benchmark comparisons (not just buy-and-hold, e.g., MSCI World)
   - % win rate
   - % of total wallet amount that had market exposure over time
-- **Evaluation Graphs:**
-  - Total gain% vs MSCI World & vs 2%pa
-  - Gain% vs duration of each trade in scatter plot
-  - Confidence/risk vs gain per trade in scatter plot
-  - Histogram of total % gained per stock (overall trades with it)
-  - Histogram of amount of trades per stock
-  - Result of other indicators compared to good trades, and bad trades - correlate which go well with it
-  - Compare total % result against 2%pa and MSCI World, plus separate alpha graph between world and strategy
-- **Grid Search Analysis:**
+    o- **Grid Search Analysis:**
   - Pareto frontier visualization (optimal risk/reward trade-offs)
   - Automated parameter sensitivity analysis
   - Config diff tool (compare two strategies side-by-side)
@@ -122,8 +123,6 @@ Evidence for completed work is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_R
   - Trailing stops (follow price up/down)
   - Time-based stops (exit after N days regardless of price)
   - Volatility-adjusted stops (wider in volatile periods)
-- **Position Size Constraints:**
-  - Limit amount of parallel trades per instrument (not global)
 
 ### Portfolio & Multi-Asset Support
 
@@ -143,14 +142,10 @@ Evidence for completed work is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_R
 - **Trading System Integration:** Connect to broker APIs (future)
 - **Trade Execution Types:** Support for long & short trades, plus limit orders, market orders, etc.
 
-### Infrastructure
+### Performance optimization opportunities (monitoring done)
 
-- **Config Validation:** Validate strategy configs at creation
-  - EMA short < long, positive values, valid ranges
-  - Fail fast with clear error messages
-- **Standardize Imports:** Fix inconsistent import styles
-  - Remove sys.path.insert() where possible
-  - Use relative imports within core/, absolute from cli/
+- **Optimization:** Data is already loaded once per instrument (no per-step disk reads). Indicator calculation runs per (eval_date, instrument) slice from scratch; optional caching by (instrument, end_date) could avoid duplicate work for identical slices. Elliott Wave and target calculation have no shared cache; vectorizing/numba on hot paths only if profiling justifies.
+- **Parallelization:** Per-indicator: run RSI, EMA, MACD, ADX, ATR in parallel inside `TechnicalIndicators.calculate_all`. Per-instrument: run instrument loop inside each eval_date in parallel (merge signals afterward).
 
 ### Advanced Features (Experimental)
 
@@ -163,10 +158,8 @@ Evidence for completed work is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_R
 - Signal rule extraction (separate SignalRule classes + rule engine)
 - Function refactoring (break down 200-300 line functions for maintainability)
 
+---
+
 ## Status & Metrics
 
 Evidence for tested hypotheses (position sizing, risk/reward, EW params, trend filter, regime, multi-instrument, inverted EW, etc.) is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md). Open items are listed under Next Steps above.
-
----
-
-**Current baseline:** `configs/baseline.yaml` (position 0.35, risk_reward 2.5). Evidence for these choices is in [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md) (Position Sizing and Risk Management, Risk/Reward Ratio). Optional upgrade: EW confidence 0.60–0.70, wave_length 0.30 (see Elliott Wave Parameter Sweep).

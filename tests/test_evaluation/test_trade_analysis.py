@@ -6,6 +6,7 @@ import pandas as pd
 from core.evaluation.trade_analysis import (
     aggregate_positions_by_signal_type,
     aggregate_trades_dataframe_by_signal_type,
+    analyze_pretrade_predictors,
 )
 from core.evaluation.portfolio import Position, PositionStatus
 
@@ -97,3 +98,31 @@ class TestAggregateTradesDataframeBySignalType:
         assert out["buy"]["count"] == 1
         assert out["buy"]["avg_pnl_pct"] == 10.0  # 5/50*100
         assert out["buy"]["total_pnl_pct"] == 10.0
+
+
+class TestAnalyzePretradePredictors:
+    def test_empty_df(self):
+        df = pd.DataFrame(columns=["status", "cost_basis", "pnl"])
+        out = analyze_pretrade_predictors(df)
+        assert out == {}
+
+    def test_filters_open(self):
+        df = pd.DataFrame([
+            {"status": "open", "cost_basis": 50.0, "pnl": 5.0, "indicator_confirmations": 1},
+            {"status": "closed_target", "cost_basis": 50.0, "pnl": 3.0, "indicator_confirmations": 2},
+        ])
+        out = analyze_pretrade_predictors(df)
+        assert "indicator_confirmations" in out
+        assert "2" in out["indicator_confirmations"]
+        assert out["indicator_confirmations"]["2"]["count"] == 1
+        assert out["indicator_confirmations"]["2"]["win_rate_pct"] == 100.0
+
+    def test_certainty_bins(self):
+        df = pd.DataFrame([
+            {"status": "closed_target", "cost_basis": 50.0, "pnl": 5.0, "certainty": 0.2},
+            {"status": "closed_target", "cost_basis": 50.0, "pnl": -2.0, "certainty": 0.8},
+        ])
+        out = analyze_pretrade_predictors(df)
+        assert "certainty_bins" in out
+        assert any("low" in k for k in out["certainty_bins"])
+        assert any("high" in k for k in out["certainty_bins"])

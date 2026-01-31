@@ -36,14 +36,13 @@ ELLIOTT_INVERTED_MIN_WAVE_SIZE = 0.02  # Default, can be optimized separately
 
 # Trade management defaults
 RISK_REWARD_RATIO = 2.0
-POSITION_SIZE_PCT = 0.2  # 20% of capital per trade (base size)
-MAX_POSITIONS = 5  # Maximum concurrent positions
+POSITION_SIZE_PCT = 0.2  # Max fraction of portfolio per trade (0-1); actual size = this × quality_factor
+MAX_POSITIONS = None  # Maximum concurrent positions (None = unlimited when omitted in config)
 
-# Confidence-based position sizing (additive: base + multiplier × confirmations)
+# Confidence-based position sizing: quality factor from confirmation_score or confirmations/3 (0-1)
 USE_CONFIDENCE_SIZING = True
-CONFIDENCE_SIZE_MULTIPLIER = 0.1
 
-# Confirmation-based position sizing modulation (multiplicative, more aggressive)
+# Confirmation-based position sizing: quality factor from confirmation_size_factors (normalized to 0-1)
 USE_CONFIRMATION_MODULATION = False
 CONFIRMATION_SIZE_FACTORS = {
     0: 0.0,   # Skip trades with no confirmations
@@ -60,12 +59,16 @@ FLEXIBLE_SIZING_TARGET_RR = 2.5  # Target risk/reward ratio for risk_reward meth
 # Per-instrument position limits
 MAX_POSITIONS_PER_INSTRUMENT = None  # None = no limit, otherwise max positions per instrument
 
+# Minimal position size (absolute value, same units as capital; None = no minimum)
+MIN_POSITION_SIZE = None  # Skip opening a position if position capital would be below this
+
 # Trend filtering (only trade in direction of EMA trend)
 USE_TREND_FILTER = False
 
 # Walk-forward evaluation defaults
 STEP_DAYS = 1  # Days between evaluation points (daily evaluation for maximum accuracy)
 LOOKBACK_DAYS = 365  # Days of history for signal generation
+INITIAL_CAPITAL = 10000.0  # Starting portfolio capital for backtest (same units as prices/fees)
 
 # Signal detection defaults
 INDICATOR_WARMUP_PERIOD = 50  # Skip first N data points where indicators aren't fully calculated
@@ -73,3 +76,13 @@ ADX_REGIME_THRESHOLD = 30  # ADX > threshold indicates strong trend (bull/bear d
 
 # Regime detection defaults
 MA_SLOPE_PERIOD = 50  # Period for moving average slope calculation in regime detection
+
+# Volatility indicator (ATR) defaults
+ATR_PERIOD = 14  # ATR period for risk/sizing (same as typical ADX)
+VOLATILITY_WINDOW = 20  # Rolling window for return-volatility (e.g. filter/confirmation)
+
+# Trading cost defaults (None = no fee; applied per side on entry and exit)
+TRADE_FEE_PCT = None  # e.g. 0.001 for 0.1% of trade value per side
+TRADE_FEE_ABSOLUTE = None  # e.g. 1.0 per trade per side
+TRADE_FEE_MIN = None  # Minimum fee per side (absolute); fee is clamped to >= this when set
+TRADE_FEE_MAX = None  # Maximum fee per side (absolute); fee is clamped to <= this when set

@@ -1,8 +1,12 @@
 """
 Tests for strategy configuration.
 """
+import tempfile
+from pathlib import Path
+
 import pytest
 from core.signals.config import StrategyConfig, BASELINE_CONFIG, generate_grid_configs
+from core.signals.config_loader import load_config_from_yaml
 from core.shared.defaults import (
     RSI_PERIOD, EMA_SHORT_PERIOD, MACD_FAST,
     ELLIOTT_MIN_CONFIDENCE, RISK_REWARD_RATIO
@@ -75,3 +79,46 @@ class TestGridGeneration:
                 config.use_macd
             )
             assert has_indicator, f"Config {config.name} has no indicators"
+
+
+class TestConfigLoaderMinConfirmationsCertainty:
+    """Config loader reads min_confirmations and min_certainty from signals section."""
+
+    def test_load_min_confirmations_and_min_certainty(self):
+        """YAML with min_confirmations and min_certainty sets them on StrategyConfig."""
+        yaml_content = """
+name: test_quality
+description: test
+indicators:
+  elliott_wave: { enabled: false }
+  rsi: { enabled: true }
+  ema: { enabled: false }
+  macd: { enabled: false }
+risk:
+  risk_reward: 2.0
+  position_size_pct: 0.2
+  max_positions: 5
+signals:
+  signal_types: all
+  min_confirmations: 2
+  min_certainty: 0.66
+regime:
+  use_regime_detection: false
+costs: {}
+evaluation:
+  step_days: 1
+  lookback_days: 365
+data:
+  instruments: [djia]
+  start_date: '2000-01-01'
+  end_date: '2020-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            config = load_config_from_yaml(path)
+            assert config.min_confirmations == 2
+            assert config.min_certainty == 0.66
+        finally:
+            path.unlink(missing_ok=True)

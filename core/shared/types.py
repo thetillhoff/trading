@@ -35,6 +35,7 @@ class TradingSignal:
     wave: Optional[Any] = None  # Wave object if from Elliott Wave detection
     source: str = "elliott"  # "elliott", "indicator", or "combined"
     indicator_confirmations: int = 0  # Number of indicators that confirmed this signal (for confidence-based sizing)
+    confirmation_score: Optional[float] = None  # Weighted 0-1 when indicator_weights used
 
     # Indicator values at signal time (for analysis)
     rsi_value: Optional[float] = None

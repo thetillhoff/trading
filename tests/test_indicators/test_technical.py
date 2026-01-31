@@ -9,6 +9,7 @@ from core.indicators.technical import (
     IndicatorValues,
     check_buy_confirmation,
     check_sell_confirmation,
+    confirmation_weighted_score,
 )
 
 
@@ -205,6 +206,30 @@ class TestGetIndicatorsAt:
         # Either None or valid; implementation may return None for first rows
         assert vals is None or isinstance(vals, IndicatorValues)
 
+    def test_calculate_all_includes_atr_and_volatility(self, sample_prices):
+        """calculate_all includes atr, atr_pct, volatility_20 for volatility-based sizing/filter."""
+        indicators = TechnicalIndicators(atr_period=14, volatility_window=20)
+        df = indicators.calculate_all(sample_prices)
+        assert "atr" in df.columns
+        assert "atr_pct" in df.columns
+        assert "volatility_20" in df.columns
+        # After warmup, ATR and volatility should be non-nan
+        tail = df.dropna(subset=["atr", "volatility_20"])
+        assert len(tail) > 0
+        assert (tail["atr"] >= 0).all()
+        valid_pct = tail["atr_pct"].dropna()
+        assert (valid_pct > 0).all() or len(valid_pct) == 0
+
+    def test_get_indicators_at_includes_volatility_fields(self, sample_prices):
+        """get_indicators_at returns atr, atr_pct, volatility_20 when enough data."""
+        indicators = TechnicalIndicators(atr_period=14, volatility_window=20)
+        ts = sample_prices.index[-1]
+        vals = indicators.get_indicators_at(sample_prices, ts)
+        assert vals is not None
+        assert hasattr(vals, "atr")
+        assert hasattr(vals, "atr_pct")
+        assert hasattr(vals, "volatility_20")
+
 
 class TestCheckBuyConfirmation:
     """Test check_buy_confirmation."""
@@ -274,3 +299,81 @@ class TestCheckSellConfirmation:
         ok, reason, count = check_sell_confirmation(vals, use_rsi=True, use_ema=False, use_macd=False)
         assert count >= 1
         assert "RSI" in reason or "favorable" in reason
+
+
+class TestConfirmationWeightedScore:
+    """Test weighted confirmation score when indicator_weights are used."""
+
+    def test_returns_none_without_weights(self):
+        ts = pd.Timestamp("2020-01-10")
+        vals = IndicatorValues(
+            timestamp=ts,
+            price=100.0,
+            rsi=30.0,
+            rsi_oversold=True,
+            rsi_overbought=False,
+            ema_short=99.0,
+            ema_long=98.0,
+            price_above_ema_short=True,
+            price_above_ema_long=True,
+            ema_bullish_cross=True,
+            ema_bearish_cross=False,
+            macd_line=0.5,
+            macd_signal=0.3,
+            macd_histogram=0.2,
+            macd_bullish=True,
+            macd_bearish=False,
+        )
+        score = confirmation_weighted_score(vals, True, True, True, weights=None, for_buy=True)
+        assert score is None
+
+    def test_weighted_score_buy_all_confirm(self):
+        ts = pd.Timestamp("2020-01-10")
+        vals = IndicatorValues(
+            timestamp=ts,
+            price=100.0,
+            rsi=30.0,
+            rsi_oversold=True,
+            rsi_overbought=False,
+            ema_short=99.0,
+            ema_long=98.0,
+            price_above_ema_short=True,
+            price_above_ema_long=True,
+            ema_bullish_cross=True,
+            ema_bearish_cross=False,
+            macd_line=0.5,
+            macd_signal=0.3,
+            macd_histogram=0.2,
+            macd_bullish=True,
+            macd_bearish=False,
+        )
+        weights = {"rsi": 0.5, "ema": 0.3, "macd": 0.2}
+        score = confirmation_weighted_score(vals, True, True, True, weights=weights, for_buy=True)
+        assert score is not None
+        assert 0.99 <= score <= 1.01  # All confirm => 1.0
+
+    def test_weighted_score_buy_partial_confirm(self):
+        ts = pd.Timestamp("2020-01-10")
+        vals = IndicatorValues(
+            timestamp=ts,
+            price=100.0,
+            rsi=50.0,  # not oversold
+            rsi_oversold=False,
+            rsi_overbought=False,
+            ema_short=99.0,
+            ema_long=98.0,
+            price_above_ema_short=True,
+            price_above_ema_long=True,
+            ema_bullish_cross=True,
+            ema_bearish_cross=False,
+            macd_line=0.5,
+            macd_signal=0.3,
+            macd_histogram=0.2,
+            macd_bullish=True,
+            macd_bearish=False,
+        )
+        weights = {"rsi": 0.5, "ema": 0.3, "macd": 0.2}
+        score = confirmation_weighted_score(vals, True, True, True, weights=weights, for_buy=True)
+        assert score is not None
+        # RSI did not confirm (0), EMA and MACD did (1 each). Weighted: (0*0.5 + 0.3 + 0.2) / (0.5+0.3+0.2) = 0.5
+        assert 0.49 <= score <= 0.51

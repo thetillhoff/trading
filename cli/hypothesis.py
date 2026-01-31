@@ -7,12 +7,7 @@ Runs multi-period, multi-category hypothesis suites by delegating to
 """
 
 import argparse
-import sys
 from pathlib import Path
-
-# Add project root to path so `core` is importable when run as a module
-project_root = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(project_root))
 
 from core.orchestration.hypothesis import HypothesisRunConfig, run_hypothesis_suite
 

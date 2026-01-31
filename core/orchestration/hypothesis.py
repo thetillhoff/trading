@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Literal, Union
 
-from core.grid_test.analysis import analyze_results_dir
+from ..grid_test.analysis import analyze_results_dir
 
 
 PeriodList = Union[List[str], Literal["all"]]

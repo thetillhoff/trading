@@ -5,7 +5,12 @@ Ensures indicators and the evaluation pipeline have not regressed since
 hypotheses were based on them. Requires djia data for 2012; run
 `make baseline-snapshot-generate` after `make download` to create/refresh
 the golden file.
+
+When baseline config changes, row/column mismatch is expected. Set
+UPDATE_BASELINE_SNAPSHOT=1 and re-run the test to refresh the snapshot
+and pass (e.g. UPDATE_BASELINE_SNAPSHOT=1 make test).
 """
+import os
 import pytest
 import pandas as pd
 import numpy as np
@@ -62,21 +67,53 @@ def test_baseline_trades_match_short_timespan_snapshot():
 
     expected = pd.read_csv(SNAPSHOT_PATH)
 
-    assert list(current.columns) == list(expected.columns), (
-        f"Column mismatch: current {list(current.columns)} vs expected {list(expected.columns)}"
-    )
-    assert len(current) == len(expected), (
-        f"Row count mismatch: current {len(current)} vs expected {len(expected)}"
-    )
+    columns_match = list(current.columns) == list(expected.columns)
+    rows_match = len(current) == len(expected)
+
+    if not columns_match or not rows_match:
+        if os.environ.get("UPDATE_BASELINE_SNAPSHOT") == "1":
+            SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            current.to_csv(SNAPSHOT_PATH, index=False)
+            expected = pd.read_csv(SNAPSHOT_PATH)
+        else:
+            msg = (
+                f"Baseline snapshot mismatch (config may have changed). "
+                f"Columns: {columns_match}, Rows: current {len(current)} vs expected {len(expected)}. "
+                "To refresh: make baseline-snapshot-generate, or UPDATE_BASELINE_SNAPSHOT=1 make test"
+            )
+            assert columns_match, msg
+            assert rows_match, msg
 
     # Normalize: '' from trades_to_dataframe and NaN from CSV represent "missing"
     current_n = _normalize_for_compare(current.replace("", np.nan))
     expected_n = _normalize_for_compare(expected.replace("", np.nan))
-    pd.testing.assert_frame_equal(
-        current_n,
-        expected_n,
-        check_exact=False,
-        atol=1e-5,
-        rtol=1e-5,
-        check_dtype=False,
-    )
+
+    try:
+        pd.testing.assert_frame_equal(
+            current_n,
+            expected_n,
+            check_exact=False,
+            atol=1e-5,
+            rtol=1e-5,
+            check_dtype=False,
+        )
+    except AssertionError as e:
+        if os.environ.get("UPDATE_BASELINE_SNAPSHOT") == "1":
+            SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            current.to_csv(SNAPSHOT_PATH, index=False)
+            # Re-read and compare (passes after write)
+            expected_n = _normalize_for_compare(pd.read_csv(SNAPSHOT_PATH).replace("", np.nan))
+            pd.testing.assert_frame_equal(
+                current_n,
+                expected_n,
+                check_exact=False,
+                atol=1e-5,
+                rtol=1e-5,
+                check_dtype=False,
+            )
+        else:
+            raise AssertionError(
+                f"Baseline snapshot content mismatch (config may have changed). "
+                "To refresh: make baseline-snapshot-generate, or UPDATE_BASELINE_SNAPSHOT=1 make test. "
+                f"Original: {e}"
+            ) from e

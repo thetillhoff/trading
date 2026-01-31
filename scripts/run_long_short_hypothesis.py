@@ -12,11 +12,9 @@ Usage:
     docker compose run --rm cli python scripts/run_long_short_hypothesis.py
     docker compose run --rm cli python scripts/run_long_short_hypothesis.py results/baseline/trades_full_20260128_145318.csv
 """
-import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 

@@ -7,7 +7,13 @@ Provides all trading indicators:
 
 All indicators follow a unified interface for calculation and signal generation.
 """
-from .technical import TechnicalIndicators, IndicatorValues, check_buy_confirmation, check_sell_confirmation
+from .technical import (
+    TechnicalIndicators,
+    IndicatorValues,
+    check_buy_confirmation,
+    check_sell_confirmation,
+    confirmation_weighted_score,
+)
 from .elliott_wave import ElliottWaveDetector, Wave, WaveType, WaveLabel
 
 __all__ = [
@@ -15,6 +21,7 @@ __all__ = [
     'IndicatorValues',
     'check_buy_confirmation',
     'check_sell_confirmation',
+    'confirmation_weighted_score',
     'ElliottWaveDetector',
     'Wave',
     'WaveType',

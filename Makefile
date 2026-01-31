@@ -1,4 +1,4 @@
-.PHONY: help clean download evaluate grid-search test test-cov baseline-snapshot-generate hypothesis-long-short
+.PHONY: help clean download evaluate grid-search test test-cov baseline-snapshot-generate hypothesis-long-short hypothesis-pretrade
 
 # Default target
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  make test-cov              Run tests with coverage report (development only)"
 	@echo "  make baseline-snapshot-generate  Create/refresh baseline trades snapshot (2012; for regression test)"
 	@echo "  make hypothesis-long-short       Print long vs short trade breakdown from latest baseline trades CSV"
+	@echo "  make hypothesis-pretrade          Print pre-trade predictor breakdown (confirmations, certainty, RSI, trend)"
 	@echo ""
 	@echo "Command Options (append to any command):"
 	@echo "  ARGS='...'                 Pass CLI arguments"
@@ -73,10 +74,6 @@ test-cov:
 # Baseline snapshot: run after make download to create/refresh tests/snapshots/baseline_trades_short.csv
 baseline-snapshot-generate:
 	docker compose run --rm --build cli python scripts/generate_baseline_snapshot.py
-
-# Long vs short: analyze latest baseline trades CSV (run make evaluate first to produce trades)
-hypothesis-long-short:
-	docker compose run --rm --build cli python scripts/run_long_short_hypothesis.py
 
 # Cleanup
 clean:

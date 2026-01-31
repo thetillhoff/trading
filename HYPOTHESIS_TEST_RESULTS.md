@@ -102,6 +102,16 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 
 ---
 
+### Wave-relationship targets (wave-specific targets) improve alpha vs fixed risk/reward
+
+**Hypothesis:** Using wave-relationship-based targets (Wave 3: 1.618–2.618× Wave 1; Wave 5: equal to Wave 1 or 0.618× Wave 3; Wave C: equal to Wave A or 1.618× Wave A) improves alpha versus fixed risk/reward targets only.
+
+**Findings:** Grid-search full_period_20yr DJIA: treatment (use_wave_relationship_targets true) yields ~34.8 points higher alpha (~21% improvement) than control (false), with similar win rates and fewer trades (higher trade quality).
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, full period 20yr, EW+all indicators — enabling wave-relationship-aware targets improves alpha; baseline should use use_wave_relationship_targets true.
+
+---
+
 ## Indicator Combination Hypotheses
 
 ### Combining indicators dilutes Elliott Wave signal quality
@@ -144,6 +154,16 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 
 ---
 
+### Indicator weights (confirmation weighting) improve alpha
+
+**Hypothesis:** Varying per-indicator weights (rsi, ema, macd) for confirmation score (used in position sizing) improves alpha versus no weights (count-based certainty).
+
+**Findings:** Grid-search full period 2000–2020 DJIA (after fixing portfolio to use confirmation_score for sizing when weights are set): control (no indicator_weights) +199.95% alpha, 42.28% win rate, 1,620 trades. Best: rsi60/ema20/macd20 +253.67%, 42.24% win, 1,617 trades. RSI-heavy weights (0.6, 0.5, 0.4) beat control; equal (0.33/0.33/0.34) ~control; MACD-heavy (0.2/0.3/0.5, 0.25/0.25/0.5) underperformed (+176–192%).
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, full period 20yr, EW+all indicators, position 0.35, risk_reward 2.5 — RSI-heavy indicator_weights improve alpha; best among tested: rsi 0.6, ema 0.2, macd 0.2. Baseline should use these weights.
+
+---
+
 ## Regime Detection Hypotheses
 
 ### ADX-based regime detection improves Elliott Wave alpha
@@ -163,6 +183,28 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 **Findings:** All thresholds yield identical alpha (+7.31%), win rate, and trades. Regime logic appears not to affect the evaluated path.
 
 **Conclusion:** INCONCLUSIVE. Either regime is not active in the tested path or thresholds do not bind; no evidence that threshold choice matters in this setup.
+
+---
+
+### Regime redesign (control vs ADX+MA vs trend_vol)
+
+**Hypothesis:** A redesigned regime model (ADX+MA with invert_signals_in_bull honored, or close-only trend+volatility classifier) improves alpha versus no regime.
+
+**Findings:** Grid-search full period 2000–2020 DJIA: control (use_regime_detection false) +199.95% alpha, 42.28% win rate, 1,620 trades. Treatment ADX+MA: +98.70%, 41.31%, 1,704 trades. Treatment trend_vol: +54.30%, 40.87%, 1,938 trades. Enabling either regime mode substantially reduces alpha and win rate; control is best.
+
+**Conclusion:** REJECTED. Under circumstances: walk-forward on DJIA, full period 20yr, EW+all indicators, position 0.35, risk_reward 2.5 — no regime (control) is optimal; ADX+MA and trend_vol regimes both reduce alpha. Baseline should keep use_regime_detection false.
+
+---
+
+## Volatility Detection Hypotheses
+
+### Volatility sizing (ATR/price) or volatility filter (20d return std) improves alpha
+
+**Hypothesis:** Enabling volatility-based position sizing (reduce size when ATR/price > threshold) or a volatility confirmation filter (skip confirmation when 20d return std > threshold) improves alpha versus baseline (no volatility options).
+
+**Findings:** Grid-search full period 2000–2020 DJIA, configs control vs treatment_volatility_filter: control +253.67% alpha, 42.24% win rate, 1,617 trades; treatment_filter +253.67% alpha, 42.24% win rate, 1,617 trades — identical. Volatility filter (use_volatility_filter true, volatility_max 0.02) produced no change in alpha, win rate, or trade count. (Treatments volatility_sizing and both were not in this run.)
+
+**Conclusion:** REJECTED for volatility filter. Under circumstances: walk-forward on DJIA, full period 20yr, EW+all indicators, indicator_weights — enabling use_volatility_filter does not improve alpha; control and filter treatment are identical. No evidence to enable volatility filter in baseline. Volatility sizing (ATR/price) remains untested in this run.
 
 ---
 
@@ -218,7 +260,7 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 
 **Findings:** Baseline (regular EW + all indicators): +132.08% alpha, 1,741 trades. Inverted+regular+all indicators: +106.12%, 1,833 trades. Inverted+regular EW only: +28.51%. Inverted EW + all indicators (no regular EW): -30.34%. Inverted-only or inverted-without-regular underperforms; adding inverted to baseline raises trade count but lowers alpha on the full 2000–2020 period.
 
-**Conclusion:** REJECTED. Under circumstances: full period 2000–2020, EW+indicators baseline — inverted Elliott Wave does not improve alpha; baseline remains optimal. Inverted EW alone is strongly negative.
+**Conclusion:** REJECTED. Under circumstances: full period 2000–2020, EW+indicators baseline — inverted Elliott Wave does not improve alpha; baseline remains optimal. Inverted EW alone is strongly negative. Root cause (investigation): inverted EW reuses long-optimized thresholds on inverted data; short trades effectively “fade the dip” in an overall uptrend; target/stop payoffs are asymmetric, leading to more small losses on shorts; regime/filter logic adds noise.
 
 ---
 
@@ -230,7 +272,7 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 
 **Findings:** Configs in `configs/hypothesis_inverted_exit/`: control (baseline, no inverted exit) vs inverted_exit (baseline + elliott_wave_inverted_exit). Period 2018–2020, DJIA: control +19.52% alpha, 129 trades, 46.5% win rate; inverted_exit +4.84% alpha, 138 trades, 39.1% win rate. Delta: alpha -14.69%, trades +9. Sell-to-close signals fire and add exits; they reduce alpha and win rate.
 
-**Conclusion:** REJECTED. Under circumstances: 2018–2020, DJIA, EW+indicators baseline — inverted EW exit (sell-to-close) reduces alpha and win rate versus control. The extra exits from inverted EW SELLs close longs earlier than target/stop would, cutting winners. Baseline (control) remains preferable.
+**Conclusion:** REJECTED. Under circumstances: 2018–2020, DJIA, EW+indicators baseline — inverted EW exit (sell-to-close) reduces alpha and win rate versus control. The extra exits from inverted EW SELLs close longs earlier than target/stop would, cutting winners. Baseline (control) remains preferable. Consistent with sell-signal doubling: inverted EW adds no edge in this setup.
 
 ---
 
@@ -297,6 +339,50 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 **Findings:** Sweep of eight configs (baseline plus EMA 15/40, 25/60; MACD signal 9, 15; RSI period 5, 9, 14): RSI period 5 yields highest alpha (+165.13%), then baseline (+153.57%), then MACD signal 15 (+131.46%), ema_25_60 (+117.26%), ema_15_40 (+95.62%), macd_signal_09 (+92.90%), rsi_period_14 (+84.02%), rsi_period_09 (+75.07%). Win rates 41.4–42.8%; trade counts 1373–1810. RSI period 5 adds ~11.6 pp alpha over baseline; MACD 15 and EMA variants trail baseline.
 
 **Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, full period 2000–2020, EW+all indicators, position 0.35, risk_reward 2.5 — RSI period 5 is optimal among the tested EMA/MACD/RSI variants; baseline (RSI 7) is second. MACD signal 15 outperforms baseline MACD signal 12; EMA 15/40 and 25/60 underperform baseline EMA 20/50.
+
+---
+
+## Pre-Trade Analysis (Predictors of Outcome)
+
+### At-entry features that mark trades as more or less likely to succeed
+
+**Hypothesis:** There are indications on the trades (available before the trade is executed) that mark them as more probable to succeed or fail.
+
+**Findings:** Baseline trades (full period, DJIA, EW+all indicators), closed trades only. Breakdown by pre-trade feature:
+
+**Indicator confirmations:** More confirmations → higher win rate and avg PnL %. 1 conf: 41.76% win, 0.10% avg PnL (1,693 trades). 2 conf: 44.44%, 0.43% (90). 3 conf: 74.07%, 1.51% (27). So 2–3 confirmations are a positive predictor.
+
+**Certainty (confidence at entry):** High certainty (0.66–1): 51.28% win, 0.68% avg PnL (117 trades). Mid (0.33–0.66): 41.76%, 0.10% (1,693). Higher certainty predicts better outcome.
+
+**Trend direction:** Bullish: 40.64% win, 0.03% (967). Bearish: 41.33%, 0.04% (675). Empty: 56.55%, 1.19% (168). Trades with no trend_direction do best in this sample; likely a different subset (e.g. trend filter off). Not a clear filter for “better” trades.
+
+**RSI zone at entry:** Neutral (30–70): 44.46% win, 0.08% (668). Overbought (>70): 39.10%, 0.02% (688). Oversold (<30): 37.06%, -0.06% (286). Neutral RSI does best; extreme RSI (oversold/overbought) underperforms.
+
+**Conclusion:** ACCEPTED (modified). Some pre-trade features do predict outcome under the tested circumstances. Usable indications: (1) more indicator confirmations (2–3) → higher win rate and avg PnL; (2) higher certainty (0.66–1) → better outcome; (3) RSI in neutral zone (30–70) outperforms oversold/overbought. Trend direction is not a clear predictor in this setup. Under circumstances: baseline config, full period 2000–2020, DJIA — confirmations and certainty are the strongest at-entry predictors; filtering for 2+ confirmations or high certainty could improve selectivity.
+
+### Signal quality filters (implementation)
+
+**Hypothesis:** Configurable entry filters by min confirmations and min certainty improve selectivity by excluding low-quality signals.
+
+**Findings:** Config keys `min_confirmations` and `min_certainty` are implemented. When set in config (e.g. under `signals`: `min_confirmations: 2`, `min_certainty: 0.66`), the detector emits only signals with indicator confirmations ≥ min_confirmations and effective certainty ≥ min_certainty. Effective certainty is `confirmation_score` when indicator_weights are used, else `indicator_confirmations / 3`. No filter is applied when either key is unset (current behaviour).
+
+**Conclusion:** ACCEPTED. Configurable signal quality filters are available; set `min_confirmations` and/or `min_certainty` in config to align with the pre-trade evidence above.
+
+### Signal quality parameter grid (min_confirmations / min_certainty)
+
+**Hypothesis:** Some choice of min_confirmations and/or min_certainty improves alpha and selectivity versus no filter on the same baseline.
+
+**Findings:** Grid-search over 8 configs (control, min_confirmations 1/2/3, min_certainty 0.5/0.66/0.8, combined min_conf_2 + min_cert_0.66), DJIA 2008–2012, baseline otherwise. Best alpha: min_certainty 0.5 (+63.74%, 80% win rate, 30 trades). Then min_certainty 0.66 (+49.75%, 29 trades), min_certainty 0.8 (+44.21%, 18 trades), combined (+36.54%, 24 trades). Control and min_confirmations 1 tied (+32.73%, 286 trades, 46.2% win rate). min_confirmations 2 and 3 reduced trades and raised win rate but lowered alpha (27.43%, 11.92%). min_certainty filters dominated: fewer trades, much higher win rate and alpha.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, 2008–2012, baseline config with indicator_weights — min_certainty 0.5 is optimal among the tested values; min_certainty 0.66 is a close second. Baseline updated to use min_certainty: 0.5.
+
+### Conf × cert grid (min_confirmations × min_certainty factorial)
+
+**Hypothesis:** Combining min_confirmations with min_certainty improves over either alone; optimal is a specific conf–cert pair.
+
+**Findings:** Grid-search over 9 configs (control; conf 1, 2; cert 0.5, 0.66; conf_1×cert_050, conf_1×cert_066, conf_2×cert_050, conf_2×cert_066), DJIA 2008–2012. Best alpha: cert_050 and conf_1_cert_050 tied (+63.74%, 80% win, 30 trades). cert_066 and conf_1_cert_066 tied (+49.75%, 29 trades). conf_2_cert_050 and conf_2_cert_066 tied (+36.54%, 24 trades). control and conf_1 tied (+32.73%, 286 trades). conf_2 alone (+27.43%, 34 trades). Adding min_confirmations 1 on top of min_certainty does not change the signal set (same trades); min_certainty alone drives the filter. Stricter conf_2 + cert reduces trades further but lowers alpha.
+
+**Conclusion:** VERIFIED (modified). Under circumstances: DJIA 2008–2012, baseline with indicator_weights — min_certainty 0.5 is optimal; min_confirmations adds no benefit when cert is already set (same 30 trades for cert_050 and conf_1_cert_050). Baseline (min_certainty: 0.5, no min_confirmations) remains correct.
 
 ---
 

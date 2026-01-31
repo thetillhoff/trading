@@ -16,9 +16,7 @@ Usage:
 import sys
 from pathlib import Path
 
-# Project root (parent of scripts/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.signals.config_loader import load_config_from_yaml
 from core.evaluation.walk_forward import WalkForwardEvaluator

@@ -11,10 +11,6 @@ import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
 
-# Add core to path
-core_dir = Path(__file__).parent.parent / "core"
-sys.path.insert(0, str(core_dir.parent))
-
 from core.data.loader import DataLoader
 from core.signals.config import StrategyConfig, generate_grid_configs
 from core.signals.config_loader import load_config_from_yaml
@@ -41,11 +37,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Grid search on DJIA
+    # Grid search on DJIA (dates come from each config YAML)
     python -m cli.grid_search --instrument djia
-
-    # Grid search on specific time range
-    python -m cli.grid_search --instrument sp500 --start-date 2010-01-01 --end-date 2020-01-01
 
     # Analyze only (e.g. after hypothesis runs): write analysis_report.md and CSVs into DIR
     python -m cli.grid_search --analyze results/hypothesis_tests_YYYYMMDD_HHMMSS
@@ -55,17 +48,7 @@ Examples:
     parser.add_argument(
         "--instrument", "-i",
         default="djia",
-        help="Instrument to evaluate (default: djia)",
-    )
-    parser.add_argument(
-        "--start-date", "-s",
-        type=str,
-        help="Start date for evaluation (YYYY-MM-DD)",
-    )
-    parser.add_argument(
-        "--end-date", "-e",
-        type=str,
-        help="End date for evaluation (YYYY-MM-DD)",
+        help="Instrument to evaluate (default: djia). Dates are always taken from configs.",
     )
     parser.add_argument(
         "--column",
@@ -149,38 +132,22 @@ Examples:
     
     print(f"  Loaded {len(configs)} configurations from {len(yaml_files)} files")
     
-    # Apply CLI arguments to YAML-loaded configs (CLI takes precedence over config values)
-    if args.instrument or args.start_date or args.end_date:
-        print(f"  Using CLI arguments (takes precedence over config values):")
-        if args.instrument:
-            print(f"    Instrument: {args.instrument}")
-        if args.start_date:
-            print(f"    Start date: {args.start_date}")
-        if args.end_date:
-            print(f"    End date: {args.end_date}")
-        
+    # Apply CLI arguments to YAML-loaded configs (instrument only; dates always from config)
+    if args.instrument:
+        print(f"  Using CLI instrument (overrides config): {args.instrument}")
         for config in configs:
-            if args.instrument:
-                config.instruments = [args.instrument]
-            if args.start_date:
-                config.start_date = args.start_date
-            if args.end_date:
-                config.end_date = args.end_date
+            config.instruments = [args.instrument]
     
-    # Validate all configs have required fields (use defaults only if not set)
+    # Validate all configs have required fields (dates from config only; defaults if missing)
     for config in configs:
         if not config.instruments:
             config.instruments = ["djia"]  # Default
         if not config.start_date:
-            # Only warn if CLI didn't provide it and config doesn't have it
-            if not args.start_date:
-                print(f"Warning: Config '{config.name}' missing start_date, using 2000-01-01")
-            config.start_date = args.start_date or "2000-01-01"
+            print(f"Warning: Config '{config.name}' missing start_date, using 2000-01-01")
+            config.start_date = "2000-01-01"
         if not config.end_date:
-            # Only warn if CLI didn't provide it and config doesn't have it
-            if not args.end_date:
-                print(f"Warning: Config '{config.name}' missing end_date, using 2020-01-01")
-            config.end_date = args.end_date or "2020-01-01"
+            print(f"Warning: Config '{config.name}' missing end_date, using 2020-01-01")
+            config.end_date = "2020-01-01"
     
     print(f"\nTesting {len(configs)} configurations...")
     print()
@@ -325,7 +292,6 @@ def update_baseline_config(results: list):
     print(f"  risk_reward: {best_config.risk_reward}")
     print(f"  position_size_pct: {best_config.position_size_pct}")
     print(f"  max_positions: {best_config.max_positions}")
-    print(f"  confidence_size_multiplier: {best_config.confidence_size_multiplier}")
     print()
     print("To update baseline manually, edit:")
     print("  - core/signals/config.py (BASELINE_CONFIG)")

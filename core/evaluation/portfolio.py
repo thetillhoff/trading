@@ -9,19 +9,12 @@ Simulates actual trading with a wallet that:
 """
 import pandas as pd
 import numpy as np
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import sys
-from pathlib import Path
 
-# Add parent directories to path for imports
-core_dir = Path(__file__).parent.parent
-project_root = core_dir.parent
-sys.path.insert(0, str(project_root))
-
-from core.shared.types import SignalType
+from ..shared.types import SignalType
 
 
 class PositionStatus(Enum):
@@ -61,6 +54,7 @@ class Position:
     risk_reward_ratio: float = 0.0  # Target distance / risk amount
     projection_price: Optional[float] = None  # Expected price projection (could be target or calculated)
     position_size_method: str = "base"  # Which sizing method was used: "base", "confidence_sizing", "confirmation_modulation"
+    quality_factor: float = 0.0  # Sizing factor in [0, 1]; actual_size_pct = position_size_pct * quality_factor
     trend_filter_active: bool = False  # Whether trend filter was used for this trade
     trend_direction: str = ""  # "bullish" or "bearish" at entry
 
@@ -116,6 +110,9 @@ class SimulationResult:
     profit_factor: float = 0.0  # Total gains / Total losses (>1 is good)
     expectancy_pct: float = 0.0  # Expected % return per trade
 
+    # Trading costs (sum of all entry + exit fees paid)
+    total_trading_costs: float = 0.0
+
 
 class PortfolioSimulator:
     """
@@ -136,7 +133,6 @@ class PortfolioSimulator:
         max_positions_per_instrument: Optional[int] = None,  # Maximum positions per instrument (None = no limit)
         max_days: Optional[int] = None,  # Maximum days to hold a position
         use_confidence_sizing: bool = False,  # Scale position size with indicator confirmations
-        confidence_size_multiplier: float = 0.1,  # Additional % per confirmation
         use_confirmation_modulation: bool = False,  # Use multiplicative sizing based on confirmations
         confirmation_size_factors: Optional[Dict[int, float]] = None,  # Sizing factors by confirmation count
         use_volatility_sizing: bool = False,  # Adjust position size based on volatility
@@ -145,6 +141,11 @@ class PortfolioSimulator:
         use_flexible_sizing: bool = False,  # Enable flexible sizing based on signal quality
         flexible_sizing_method: str = "confidence",  # "confidence", "risk_reward", or "combined"
         flexible_sizing_target_rr: float = 2.5,  # Target risk/reward ratio for risk_reward method
+        trade_fee_pct: Optional[float] = None,  # e.g. 0.001 for 0.1% of trade value per side
+        trade_fee_absolute: Optional[float] = None,  # e.g. 1.0 per trade per side
+        trade_fee_min: Optional[float] = None,  # Minimum fee per side (absolute); clamp when set
+        trade_fee_max: Optional[float] = None,  # Maximum fee per side (absolute); clamp when set
+        min_position_size: Optional[float] = None,  # Skip opening if position capital < this (absolute)
     ):
         """
         Initialize the portfolio simulator.
@@ -155,8 +156,7 @@ class PortfolioSimulator:
             max_positions: Maximum number of concurrent positions
             max_positions_per_instrument: Maximum positions per instrument (None = no limit)
             max_days: Maximum days to hold a position (None = no limit)
-            use_confidence_sizing: If True, scale position size based on indicator confirmations (additive)
-            confidence_size_multiplier: Additional % per indicator confirmation (e.g., 0.1 = +10% per confirmation)
+            use_confidence_sizing: If True, scale position size based on indicator confirmations (quality factor 0–1)
             use_confirmation_modulation: If True, multiply position size by factors based on confirmations (multiplicative)
             confirmation_size_factors: Dict mapping confirmation count to size multiplier (e.g., {0: 0.0, 1: 0.5, 2: 2.0})
             use_volatility_sizing: If True, reduce position size when volatility (ATR/price) is high
@@ -165,14 +165,21 @@ class PortfolioSimulator:
             use_flexible_sizing: If True, scale position size based on signal confidence/risk-reward
             flexible_sizing_method: Method for flexible sizing ("confidence", "risk_reward", or "combined")
             flexible_sizing_target_rr: Target risk/reward ratio for risk_reward method
+            trade_fee_pct: Fee as fraction of trade value per side (e.g. 0.001 = 0.1%). None = no fee.
+            trade_fee_absolute: Fixed fee per trade per side. None = no fee.
+            trade_fee_min: If set, fee per side is at least this (absolute).
+            trade_fee_max: If set, fee per side is at most this (absolute).
+            min_position_size: If set, skip opening a position when position capital would be below this (absolute).
         """
         self.initial_capital = initial_capital
         self.position_size_pct = position_size_pct
+        self.trade_fee_min = trade_fee_min
+        self.trade_fee_max = trade_fee_max
+        self.min_position_size = min_position_size
         self.max_positions = max_positions if max_positions is not None else 999999  # None = unlimited
         self.max_positions_per_instrument = max_positions_per_instrument
         self.max_days = max_days
         self.use_confidence_sizing = use_confidence_sizing
-        self.confidence_size_multiplier = confidence_size_multiplier
         self.use_confirmation_modulation = use_confirmation_modulation
         self.confirmation_size_factors = confirmation_size_factors or {0: 0.0, 1: 0.5, 2: 2.0, 3: 2.0}
         self.use_volatility_sizing = use_volatility_sizing
@@ -181,6 +188,19 @@ class PortfolioSimulator:
         self.use_flexible_sizing = use_flexible_sizing
         self.flexible_sizing_method = flexible_sizing_method
         self.flexible_sizing_target_rr = flexible_sizing_target_rr
+        self.trade_fee_pct = trade_fee_pct
+        self.trade_fee_absolute = trade_fee_absolute
+
+    def _fee_for_trade(self, trade_value: float) -> float:
+        """Fee for one side (entry or exit). trade_value * trade_fee_pct + trade_fee_absolute, clamped to [trade_fee_min, trade_fee_max] when set."""
+        pct = self.trade_fee_pct or 0.0
+        absolute = self.trade_fee_absolute or 0.0
+        fee = (trade_value * pct) + absolute
+        if self.trade_fee_min is not None and fee < self.trade_fee_min:
+            fee = self.trade_fee_min
+        if self.trade_fee_max is not None and fee > self.trade_fee_max:
+            fee = self.trade_fee_max
+        return fee
     
     def simulate_buy_and_hold(
         self,
@@ -259,24 +279,31 @@ class PortfolioSimulator:
     
     def simulate_strategy(
         self,
-        prices: pd.Series,
+        prices: Union[pd.Series, Dict[str, pd.Series]],
         signals: List,  # List of Signal objects
         start_date: Optional[pd.Timestamp] = None,
         end_date: Optional[pd.Timestamp] = None,
     ) -> SimulationResult:
         """
         Simulate a trading strategy with proper capital management.
+
+        Accepts either a single price series (single-instrument) or a dict of
+        instrument name -> price series (multi-instrument). In multi-instrument
+        mode, each position is marked to its instrument's price for exits and PnL.
         
         Args:
-            prices: Price series with datetime index
+            prices: Single price series or Dict[instrument_id, price series]
             signals: List of trading signals (must have timestamp, price, 
-                    signal_type, target_price, stop_loss attributes)
+                    signal_type, target_price, stop_loss; instrument for multi-instrument)
             start_date: Simulation start date
             end_date: Simulation end date
             
         Returns:
             SimulationResult with complete simulation data
         """
+        if isinstance(prices, dict):
+            return self._simulate_strategy_multi(prices, signals, start_date, end_date)
+        # Single-instrument path (unchanged behavior)
         if start_date is None:
             start_date = prices.index.min()
         if end_date is None:
@@ -294,6 +321,7 @@ class PortfolioSimulator:
         
         # Initialize wallet
         cash = self.initial_capital
+        total_fees = 0.0
         open_positions: List[Position] = []
         closed_positions: List[Position] = []
         wallet_history: List[WalletState] = []
@@ -332,8 +360,11 @@ class PortfolioSimulator:
                     else:  # sell/short
                         pos.pnl = (pos.entry_price - price) * pos.shares
                     
-                    # Return capital to cash
-                    cash += pos.cost_basis + pos.pnl
+                    # Return capital to cash (minus exit fee)
+                    exit_value = pos.shares * pos.exit_price
+                    exit_fee = self._fee_for_trade(exit_value)
+                    total_fees += exit_fee
+                    cash += pos.cost_basis + pos.pnl - exit_fee
                     closed_positions.append(pos)
                 else:
                     still_open.append(pos)
@@ -353,7 +384,10 @@ class PortfolioSimulator:
                             oldest.exit_price = price
                             oldest.status = PositionStatus.CLOSED_SIGNAL
                             oldest.pnl = (price - oldest.entry_price) * oldest.shares
-                            cash += oldest.cost_basis + oldest.pnl
+                            exit_value = oldest.shares * oldest.exit_price
+                            exit_fee = self._fee_for_trade(exit_value)
+                            total_fees += exit_fee
+                            cash += oldest.cost_basis + oldest.pnl - exit_fee
                             open_positions = [p for p in open_positions if p is not oldest]
                             closed_positions.append(oldest)
                         continue  # Do not open a short for this signal
@@ -375,102 +409,83 @@ class PortfolioSimulator:
                     if cash <= 0:
                         continue  # No cash available
                     
-                    # Determine position size based on total portfolio value
+                    # Determine position size: actual_size_pct = position_size_pct * quality_factor (quality_factor in [0, 1])
                     invested_value = sum(pos.shares * price for pos in open_positions)
                     total_portfolio_value = cash + invested_value
-                    
-                    # Base position size
-                    base_size_pct = self.position_size_pct
-                    
-                    # Get confirmation count from signal (default to 0 if not set)
-                    confirmation_count = getattr(sig, 'indicator_confirmations', 0)
-                    
-                    # Apply position sizing strategy
+
+                    confirmation_score = getattr(sig, 'confirmation_score', None)
+                    if confirmation_score is not None:
+                        confirmation_count = int(round(confirmation_score * 3))
+                    else:
+                        confirmation_count = getattr(sig, 'indicator_confirmations', 0)
+
+                    # Primary quality factor (0-1) from confirmations
                     position_size_method = "base"
                     if self.use_confirmation_modulation:
-                        # Multiplicative sizing: multiply base by factor based on confirmation count
-                        # Factor of 0.0 means skip the trade entirely
-                        size_factor = self.confirmation_size_factors.get(confirmation_count, 1.0)
-                        if size_factor == 0.0:
-                            continue  # Skip this trade
-                        adjusted_size_pct = base_size_pct * size_factor
-                        # Cap at 100% to prevent overextension
-                        adjusted_size_pct = min(adjusted_size_pct, 1.0)
+                        raw = self.confirmation_size_factors.get(confirmation_count, 0)
+                        max_f = max(self.confirmation_size_factors.values()) if self.confirmation_size_factors else 1.0
+                        primary = raw / max_f if max_f > 0 else 0.0
+                        if primary <= 0:
+                            continue
                         position_size_method = "confirmation_modulation"
                     elif self.use_confidence_sizing:
-                        # Additive sizing: base + (multiplier * confirmations)
-                        # Example: base=0.2, multiplier=0.1, 2 confirmations = 0.2 + (0.1*2) = 0.4 (40%)
-                        adjusted_size_pct = base_size_pct + (self.confidence_size_multiplier * confirmation_count)
-                        # Cap at 100% to prevent overextension
-                        adjusted_size_pct = min(adjusted_size_pct, 1.0)
+                        primary = confirmation_score if confirmation_score is not None else min(1.0, confirmation_count / 3.0)
                         position_size_method = "confidence_sizing"
                     else:
-                        adjusted_size_pct = base_size_pct
-                    
-                    # Apply volatility-based adjustment if enabled
+                        primary = confirmation_score if confirmation_score is not None else 1.0
+
                     if self.use_volatility_sizing:
-                        volatility_ratio = self._calculate_volatility_ratio(prices, current_date)
+                        volatility_ratio = self._calculate_volatility_ratio(prices, timestamp)
                         if volatility_ratio > self.volatility_threshold:
-                            # High volatility - reduce position size
-                            adjusted_size_pct *= self.volatility_size_reduction
+                            primary *= self.volatility_size_reduction
                             position_size_method += "_vol_adjusted"
-                    
-                    # Apply flexible sizing if enabled (based on signal quality)
+
                     if self.use_flexible_sizing:
-                        # Get signal confidence (0-1)
-                        signal_confidence = getattr(sig, 'confidence', 0.5)  # Default to 0.5 if not set
-                        
-                        # Calculate risk-reward ratio (will be calculated later, but we need it here)
+                        signal_confidence = getattr(sig, 'confidence', 0.5)
                         target_price = getattr(sig, 'target_price', None)
                         stop_loss = getattr(sig, 'stop_loss', None)
                         risk_reward_ratio = 0.0
                         if target_price and stop_loss:
-                            entry_price = sig.price
+                            ep = sig.price
                             if original_signal_type == SignalType.BUY:
-                                risk_amount = entry_price - stop_loss
-                                reward_amount = target_price - entry_price
-                            else:  # SELL
-                                risk_amount = stop_loss - entry_price
-                                reward_amount = entry_price - target_price
-                            if risk_amount > 0:
-                                risk_reward_ratio = reward_amount / risk_amount
-                        
-                        # Apply flexible sizing based on method
+                                ra, ra2 = ep - stop_loss, target_price - ep
+                            else:
+                                ra, ra2 = stop_loss - ep, ep - target_price
+                            if ra > 0:
+                                risk_reward_ratio = ra2 / ra
                         if self.flexible_sizing_method == "confidence":
-                            # Scale by confidence: size = base * confidence
                             flexible_factor = signal_confidence
                         elif self.flexible_sizing_method == "risk_reward":
-                            # Scale by risk/reward ratio: size = base * min(1.0, rr / target_rr)
-                            if risk_reward_ratio > 0:
-                                flexible_factor = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr)
-                            else:
-                                flexible_factor = 0.5  # Default if no RR calculated
-                        else:  # "combined"
-                            # Weighted combination: 60% confidence, 40% risk/reward
-                            confidence_factor = signal_confidence
-                            rr_factor = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr) if risk_reward_ratio > 0 else 0.5
-                            flexible_factor = 0.6 * confidence_factor + 0.4 * rr_factor
-                        
-                        # Apply flexible factor to adjusted size
-                        adjusted_size_pct = adjusted_size_pct * flexible_factor
+                            flexible_factor = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr) if risk_reward_ratio > 0 else 0.5
+                        else:
+                            rr_f = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr) if risk_reward_ratio > 0 else 0.5
+                            flexible_factor = 0.6 * signal_confidence + 0.4 * rr_f
+                        primary *= flexible_factor
                         position_size_method += "_flexible"
-                    
-                    position_capital = total_portfolio_value * adjusted_size_pct
+
+                    quality_factor = min(1.0, max(0.0, primary))
+                    actual_size_pct = self.position_size_pct * quality_factor
+                    position_capital = total_portfolio_value * actual_size_pct
                     
                     # Can't invest more than available cash
                     position_capital = min(position_capital, cash)
                     
                     if position_capital <= 0:
                         continue
+                    if self.min_position_size is not None and position_capital < self.min_position_size:
+                        continue
                     
                     # Open position
                     entry_price = sig.price
                     shares = position_capital / entry_price
                     
-                    # Calculate certainty based on indicator confirmations
-                    # Normalize to 0-1 scale (more confirmations = higher certainty)
-                    max_possible_confirmations = 3  # RSI, EMA, MACD
-                    certainty = min(1.0, getattr(sig, 'indicator_confirmations', 0) / max_possible_confirmations)
+                    # Certainty: use weighted confirmation_score when set, else count-based
+                    confirmation_score = getattr(sig, 'confirmation_score', None)
+                    if confirmation_score is not None:
+                        certainty = confirmation_score
+                    else:
+                        max_possible_confirmations = 3  # RSI, EMA, MACD
+                        certainty = min(1.0, getattr(sig, 'indicator_confirmations', 0) / max_possible_confirmations)
 
                     # Calculate risk amount and risk-reward ratio
                     risk_amount = 0.0
@@ -520,13 +535,16 @@ class PortfolioSimulator:
                         risk_reward_ratio=risk_reward_ratio,
                         projection_price=projection_price,
                         position_size_method=position_size_method,
+                        quality_factor=quality_factor,
                         trend_filter_active=getattr(sig, 'trend_filter_active', False),
                         trend_direction=trend_direction,
                         instrument=instrument,  # Store instrument identifier
                     )
                     
                     open_positions.append(pos)
-                    cash -= position_capital
+                    entry_fee = self._fee_for_trade(position_capital)
+                    total_fees += entry_fee
+                    cash -= position_capital + entry_fee
             
             # 3. Calculate current wallet state
             invested_value = sum(pos.shares * price for pos in open_positions)
@@ -540,7 +558,22 @@ class PortfolioSimulator:
                 total_value=total_value,
                 return_pct=return_pct,
             ))
-            
+            if total_value < 10:
+                for pos in open_positions:
+                    pos.exit_timestamp = timestamp
+                    pos.exit_price = price
+                    pos.status = PositionStatus.CLOSED_END
+                    if pos.signal_type == "buy":
+                        pos.pnl = (price - pos.entry_price) * pos.shares
+                    else:
+                        pos.pnl = (pos.entry_price - price) * pos.shares
+                    exit_value = pos.shares * pos.exit_price
+                    exit_fee = self._fee_for_trade(exit_value)
+                    total_fees += exit_fee
+                    cash += pos.cost_basis + pos.pnl - exit_fee
+                    closed_positions.append(pos)
+                open_positions = []
+                break
             # Show progress periodically
             if (day_idx + 1) % progress_interval == 0 or day_idx == total_days - 1:
                 pct = ((day_idx + 1) / total_days) * 100
@@ -565,7 +598,10 @@ class PortfolioSimulator:
             else:
                 pos.pnl = (pos.entry_price - final_price) * pos.shares
             
-            cash += pos.cost_basis + pos.pnl
+            exit_value = pos.shares * pos.exit_price
+            exit_fee = self._fee_for_trade(exit_value)
+            total_fees += exit_fee
+            cash += pos.cost_basis + pos.pnl - exit_fee
             closed_positions.append(pos)
         
         # Calculate final metrics
@@ -638,6 +674,313 @@ class PortfolioSimulator:
             avg_loss_pct=avg_loss_pct,
             profit_factor=profit_factor,
             expectancy_pct=expectancy_pct,
+            total_trading_costs=total_fees,
+        )
+    
+    def _simulate_strategy_multi(
+        self,
+        prices_by_instrument: Dict[str, pd.Series],
+        signals: List,
+        start_date: Optional[pd.Timestamp] = None,
+        end_date: Optional[pd.Timestamp] = None,
+    ) -> SimulationResult:
+        """Multi-instrument simulation: union of dates, per-position price for exit and PnL."""
+        if not prices_by_instrument:
+            return self._empty_result()
+        instruments = list(prices_by_instrument.keys())
+        first_instrument = instruments[0]
+        # Union of all trading days, sorted
+        union_index = pd.Index([])
+        for s in prices_by_instrument.values():
+            union_index = union_index.union(s.index)
+        union_index = union_index.sort_values()
+        # Reindex each series to union index (ffill then bfill so no NaN)
+        reindexed: Dict[str, pd.Series] = {}
+        for inst, s in prices_by_instrument.items():
+            reindexed[inst] = s.reindex(union_index).ffill().bfill()
+        if start_date is None:
+            start_date = pd.Timestamp(union_index.min())
+        if end_date is None:
+            end_date = pd.Timestamp(union_index.max())
+        mask = (union_index >= start_date) & (union_index <= end_date)
+        dates_index = union_index[mask]
+        if len(dates_index) < 2:
+            return self._empty_result()
+        signals = [s for s in signals if start_date <= s.timestamp <= end_date]
+        signals = sorted(signals, key=lambda s: s.timestamp)
+        cash = self.initial_capital
+        total_fees = 0.0
+        open_positions: List[Position] = []
+        closed_positions: List[Position] = []
+        wallet_history: List[WalletState] = []
+        signal_by_date = {}
+        for sig in signals:
+            date = sig.timestamp.date() if hasattr(sig.timestamp, 'date') else sig.timestamp
+            if date not in signal_by_date:
+                signal_by_date[date] = []
+            signal_by_date[date].append(sig)
+        total_days = len(dates_index)
+        progress_interval = max(1, total_days // 10)
+        import time
+        sim_start = time.time()
+
+        for day_idx, timestamp in enumerate(dates_index):
+            date = timestamp.date() if hasattr(timestamp, 'date') else timestamp
+            price_at = {inst: reindexed[inst].loc[timestamp] for inst in instruments}
+
+            def get_price(pos: Position) -> float:
+                inst = pos.instrument or first_instrument
+                return float(price_at.get(inst, price_at[first_instrument]))
+
+            # 1. Check position exits
+            still_open = []
+            for pos in open_positions:
+                current_price = get_price(pos)
+                exit_reason = self._check_position_exit(pos, current_price, timestamp)
+                if exit_reason:
+                    pos.exit_timestamp = timestamp
+                    pos.exit_price = current_price
+                    pos.status = exit_reason
+                    if pos.signal_type == "buy":
+                        pos.pnl = (current_price - pos.entry_price) * pos.shares
+                    else:
+                        pos.pnl = (pos.entry_price - current_price) * pos.shares
+                    exit_value = pos.shares * pos.exit_price
+                    exit_fee = self._fee_for_trade(exit_value)
+                    total_fees += exit_fee
+                    cash += pos.cost_basis + pos.pnl - exit_fee
+                    closed_positions.append(pos)
+                else:
+                    still_open.append(pos)
+            open_positions = still_open
+
+            # 2. New signals
+            if date in signal_by_date:
+                for sig in signal_by_date[date]:
+                    if (sig.signal_type == SignalType.SELL and getattr(sig, 'close_long_only', False)):
+                        longs = [p for p in open_positions if p.signal_type == "buy"]
+                        if longs:
+                            oldest = min(longs, key=lambda p: p.entry_timestamp)
+                            exit_price = get_price(oldest)
+                            oldest.exit_timestamp = timestamp
+                            oldest.exit_price = exit_price
+                            oldest.status = PositionStatus.CLOSED_SIGNAL
+                            oldest.pnl = (exit_price - oldest.entry_price) * oldest.shares
+                            exit_value = oldest.shares * oldest.exit_price
+                            exit_fee = self._fee_for_trade(exit_value)
+                            total_fees += exit_fee
+                            cash += oldest.cost_basis + oldest.pnl - exit_fee
+                            open_positions = [p for p in open_positions if p is not oldest]
+                            closed_positions.append(oldest)
+                        continue
+                    original_signal_type = sig.signal_type
+                    if len(open_positions) >= self.max_positions:
+                        continue
+                    instrument = getattr(sig, 'instrument', None)
+                    if instrument and self.max_positions_per_instrument is not None:
+                        if sum(1 for p in open_positions if p.instrument == instrument) >= self.max_positions_per_instrument:
+                            continue
+                    if cash <= 0:
+                        continue
+                    # Position size: actual_size_pct = position_size_pct * quality_factor (quality_factor in [0, 1])
+                    invested_value = sum(pos.shares * get_price(pos) for pos in open_positions)
+                    total_portfolio_value = cash + invested_value
+                    confirmation_score = getattr(sig, 'confirmation_score', None)
+                    if confirmation_score is not None:
+                        confirmation_count = int(round(confirmation_score * 3))
+                    else:
+                        confirmation_count = getattr(sig, 'indicator_confirmations', 0)
+
+                    position_size_method = "base"
+                    if self.use_confirmation_modulation:
+                        raw = self.confirmation_size_factors.get(confirmation_count, 0)
+                        max_f = max(self.confirmation_size_factors.values()) if self.confirmation_size_factors else 1.0
+                        primary = raw / max_f if max_f > 0 else 0.0
+                        if primary <= 0:
+                            continue
+                        position_size_method = "confirmation_modulation"
+                    elif self.use_confidence_sizing:
+                        primary = confirmation_score if confirmation_score is not None else min(1.0, confirmation_count / 3.0)
+                        position_size_method = "confidence_sizing"
+                    else:
+                        primary = confirmation_score if confirmation_score is not None else 1.0
+
+                    if self.use_volatility_sizing:
+                        vol_series = reindexed.get(instrument, reindexed[first_instrument])
+                        volatility_ratio = self._calculate_volatility_ratio(vol_series, timestamp)
+                        if volatility_ratio > self.volatility_threshold:
+                            primary *= self.volatility_size_reduction
+                            position_size_method += "_vol_adjusted"
+                    if self.use_flexible_sizing:
+                        signal_confidence = getattr(sig, 'confidence', 0.5)
+                        target_price = getattr(sig, 'target_price', None)
+                        stop_loss = getattr(sig, 'stop_loss', None)
+                        risk_reward_ratio = 0.0
+                        if target_price and stop_loss:
+                            ep = sig.price
+                            if original_signal_type == SignalType.BUY:
+                                ra, ra2 = ep - stop_loss, target_price - ep
+                            else:
+                                ra, ra2 = stop_loss - ep, ep - target_price
+                            if ra > 0:
+                                risk_reward_ratio = ra2 / ra
+                        if self.flexible_sizing_method == "confidence":
+                            flexible_factor = signal_confidence
+                        elif self.flexible_sizing_method == "risk_reward":
+                            flexible_factor = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr) if risk_reward_ratio > 0 else 0.5
+                        else:
+                            rr_f = min(1.0, risk_reward_ratio / self.flexible_sizing_target_rr) if risk_reward_ratio > 0 else 0.5
+                            flexible_factor = 0.6 * signal_confidence + 0.4 * rr_f
+                        primary *= flexible_factor
+                        position_size_method += "_flexible"
+
+                    quality_factor = min(1.0, max(0.0, primary))
+                    actual_size_pct = self.position_size_pct * quality_factor
+                    position_capital = min(total_portfolio_value * actual_size_pct, cash)
+                    if position_capital <= 0:
+                        continue
+                    if self.min_position_size is not None and position_capital < self.min_position_size:
+                        continue
+                    entry_price = sig.price
+                    shares = position_capital / entry_price
+                    certainty = confirmation_score if confirmation_score is not None else min(1.0, getattr(sig, 'indicator_confirmations', 0) / 3.0)
+                    risk_amount = 0.0
+                    risk_reward_ratio = 0.0
+                    target_price = getattr(sig, 'target_price', None)
+                    stop_loss = getattr(sig, 'stop_loss', None)
+                    if target_price and stop_loss:
+                        if original_signal_type == SignalType.BUY:
+                            risk_amount = entry_price - stop_loss
+                            reward_amount = target_price - entry_price
+                        else:
+                            risk_amount = stop_loss - entry_price
+                            reward_amount = entry_price - target_price
+                        if risk_amount > 0:
+                            risk_reward_ratio = reward_amount / risk_amount
+                    ema_short = getattr(sig, 'ema_short', None)
+                    ema_long = getattr(sig, 'ema_long', None)
+                    trend_direction = ""
+                    if ema_short is not None and ema_long is not None:
+                        trend_direction = "bullish" if ema_short > ema_long else "bearish"
+                    pos = Position(
+                        entry_timestamp=timestamp,
+                        entry_price=entry_price,
+                        shares=shares,
+                        cost_basis=position_capital,
+                        target_price=target_price,
+                        stop_loss=stop_loss,
+                        signal_type=sig.signal_type.value,
+                        rsi_value=getattr(sig, 'rsi_value', None),
+                        ema_short=ema_short,
+                        ema_long=ema_long,
+                        macd_value=getattr(sig, 'macd_value', None),
+                        macd_signal=getattr(sig, 'macd_signal', None),
+                        macd_histogram=getattr(sig, 'macd_histogram', None),
+                        indicator_confirmations=getattr(sig, 'indicator_confirmations', 0),
+                        original_signal_type=original_signal_type.value,
+                        certainty=certainty,
+                        risk_amount=risk_amount,
+                        risk_reward_ratio=risk_reward_ratio,
+                        projection_price=target_price,
+                        position_size_method=position_size_method,
+                        quality_factor=quality_factor,
+                        trend_filter_active=getattr(sig, 'trend_filter_active', False),
+                        trend_direction=trend_direction,
+                        instrument=instrument,
+                    )
+                    open_positions.append(pos)
+                    entry_fee = self._fee_for_trade(position_capital)
+                    total_fees += entry_fee
+                    cash -= position_capital + entry_fee
+            invested_value = sum(pos.shares * get_price(pos) for pos in open_positions)
+            total_value = cash + invested_value
+            return_pct = ((total_value - self.initial_capital) / self.initial_capital) * 100
+            wallet_history.append(WalletState(
+                timestamp=timestamp,
+                cash=cash,
+                invested_value=invested_value,
+                total_value=total_value,
+                return_pct=return_pct,
+            ))
+            if total_value < 10:
+                for pos in open_positions:
+                    exit_price = get_price(pos)
+                    pos.exit_timestamp = timestamp
+                    pos.exit_price = exit_price
+                    pos.status = PositionStatus.CLOSED_END
+                    if pos.signal_type == "buy":
+                        pos.pnl = (exit_price - pos.entry_price) * pos.shares
+                    else:
+                        pos.pnl = (pos.entry_price - exit_price) * pos.shares
+                    exit_fee = self._fee_for_trade(pos.shares * pos.exit_price)
+                    total_fees += exit_fee
+                    cash += pos.cost_basis + pos.pnl - exit_fee
+                    closed_positions.append(pos)
+                open_positions = []
+                break
+            if (day_idx + 1) % progress_interval == 0 or day_idx == total_days - 1:
+                pct = ((day_idx + 1) / total_days) * 100
+                elapsed = time.time() - sim_start
+                print(f"    Portfolio simulation: {day_idx + 1}/{total_days} ({pct:.0f}%) - {len(closed_positions)} trades closed - {elapsed:.1f}s", end='\r', flush=True)
+        print(" " * 80, end='\r', flush=True)
+        final_timestamp = dates_index[-1]
+        for pos in open_positions:
+            final_price = float(reindexed.get(pos.instrument or first_instrument, reindexed[first_instrument]).loc[final_timestamp])
+            pos.exit_timestamp = final_timestamp
+            pos.exit_price = final_price
+            pos.status = PositionStatus.CLOSED_END
+            if pos.signal_type == "buy":
+                pos.pnl = (final_price - pos.entry_price) * pos.shares
+            else:
+                pos.pnl = (pos.entry_price - final_price) * pos.shares
+            exit_fee = self._fee_for_trade(pos.shares * pos.exit_price)
+            total_fees += exit_fee
+            cash += pos.cost_basis + pos.pnl - exit_fee
+            closed_positions.append(pos)
+        all_positions = closed_positions
+        winning = [p for p in all_positions if p.pnl > 0]
+        losing = [p for p in all_positions if p.pnl <= 0]
+        total_trades = len(all_positions)
+        winning_trades = len(winning)
+        losing_trades = len(losing)
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+        final_value = wallet_history[-1].total_value if wallet_history else self.initial_capital
+        total_return = ((final_value - self.initial_capital) / self.initial_capital) * 100
+        avg_position_size = sum(p.cost_basis for p in all_positions) / len(all_positions) if all_positions else 0.0
+        days_held = [(p.exit_timestamp - p.entry_timestamp).days for p in all_positions if p.exit_timestamp and p.entry_timestamp]
+        avg_days_held = sum(days_held) / len(days_held) if days_held else 0.0
+        avg_exposure_pct = 0.0
+        if wallet_history:
+            exposures = [(state.invested_value / state.total_value * 100) if state.total_value > 0 else 0.0 for state in wallet_history]
+            avg_exposure_pct = sum(exposures) / len(exposures)
+        win_pcts = [(p.pnl / p.cost_basis * 100) for p in winning if p.cost_basis > 0]
+        loss_pcts = [(p.pnl / p.cost_basis * 100) for p in losing if p.cost_basis > 0]
+        avg_win_pct = sum(win_pcts) / len(win_pcts) if win_pcts else 0.0
+        avg_loss_pct = sum(loss_pcts) / len(loss_pcts) if loss_pcts else 0.0
+        total_gains = sum(p.pnl for p in winning)
+        total_losses = abs(sum(p.pnl for p in losing))
+        profit_factor = (total_gains / total_losses) if total_losses > 0 else (float('inf') if total_gains > 0 else 0.0)
+        win_rate_dec = win_rate / 100
+        expectancy_pct = (win_rate_dec * avg_win_pct) + ((1 - win_rate_dec) * avg_loss_pct)
+        return SimulationResult(
+            initial_capital=self.initial_capital,
+            final_capital=final_value,
+            total_return_pct=total_return,
+            total_trades=total_trades,
+            winning_trades=winning_trades,
+            losing_trades=losing_trades,
+            win_rate=win_rate,
+            wallet_history=wallet_history,
+            positions=all_positions,
+            max_drawdown_pct=self._calculate_max_drawdown(wallet_history),
+            avg_position_size=avg_position_size,
+            avg_days_held=avg_days_held,
+            avg_exposure_pct=avg_exposure_pct,
+            avg_win_pct=avg_win_pct,
+            avg_loss_pct=avg_loss_pct,
+            profit_factor=profit_factor,
+            expectancy_pct=expectancy_pct,
+            total_trading_costs=total_fees,
         )
     
     def _check_position_exit(
@@ -741,4 +1084,5 @@ class PortfolioSimulator:
             avg_loss_pct=0.0,
             profit_factor=0.0,
             expectancy_pct=0.0,
+            total_trading_costs=0.0,
         )

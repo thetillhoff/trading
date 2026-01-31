@@ -1,5 +1,5 @@
 name: baseline
-description: Current best config. Used as baseline to compare others against.
+description: Multi-instrument baseline config 2000-2020
 
 indicators:
   elliott_wave:
@@ -25,7 +25,7 @@ risk:
   risk_reward: 2.5 # target/stop ratio (e.g. 2.5:1)
   position_size_pct: 0.2 # fraction of portfolio per new trade (0–1)
   # max_positions: 10 # optional; max open positions at once
-  max_positions_per_instrument: 2  # optional; max open positions per instrument
+  max_positions_per_instrument: 3  # optional; max open positions per instrument
   min_position_size: 20  # skip trades smaller than this (USD)
   use_confidence_sizing: true
 
@@ -58,7 +58,21 @@ evaluation:
 
 data:
   instruments:
-    - djia # instrument keys (e.g. djia, sp500)
-  start_date: '2008-01-01'
-  # end_date: '2020-01-01'
-  end_date: '2012-01-01'
+    - djia
+    # - sp500
+    - dax
+    # - clean_energy
+    # - clean_tech
+    # - emerging_markets
+    # - esg_us
+    # - eurusd
+    # - gold_physical
+    - msci_world
+    - nasdaq
+    # - nextera
+    # - silver_physical
+    # - small_cap
+    # - solar_energy
+    # - tech_sector
+  start_date: '2000-01-01'
+  end_date: '2020-01-01'

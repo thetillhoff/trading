@@ -65,6 +65,9 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
     
     # Data & execution parameters
     data_params = config_dict.get('data', {})
+
+    # Trading costs
+    costs = config_dict.get('costs', {})
     
     # Build StrategyConfig
     return StrategyConfig(
@@ -101,29 +104,48 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         
         # Signals
         signal_types=signals.get('signal_types', 'all'),
-        require_all_indicators=signals.get('require_all_indicators', False),
+        min_confirmations=signals.get('min_confirmations'),
+        min_certainty=signals.get('min_certainty'),
         use_trend_filter=signals.get('use_trend_filter', USE_TREND_FILTER),
+        indicator_weights=signals.get('indicator_weights'),
         
         # Risk management
         risk_reward=risk.get('risk_reward', RISK_REWARD_RATIO),
         position_size_pct=risk.get('position_size_pct', POSITION_SIZE_PCT),
         max_positions=risk.get('max_positions', MAX_POSITIONS),
         max_positions_per_instrument=risk.get('max_positions_per_instrument', MAX_POSITIONS_PER_INSTRUMENT),
+        min_position_size=risk.get('min_position_size', MIN_POSITION_SIZE),
         use_confidence_sizing=risk.get('use_confidence_sizing', USE_CONFIDENCE_SIZING),
-        confidence_size_multiplier=risk.get('confidence_size_multiplier', CONFIDENCE_SIZE_MULTIPLIER),
         use_confirmation_modulation=risk.get('use_confirmation_modulation', USE_CONFIRMATION_MODULATION),
         use_flexible_sizing=risk.get('use_flexible_sizing', USE_FLEXIBLE_SIZING),
         flexible_sizing_method=risk.get('flexible_sizing_method', FLEXIBLE_SIZING_METHOD),
         flexible_sizing_target_rr=risk.get('flexible_sizing_target_rr', FLEXIBLE_SIZING_TARGET_RR),
+        use_wave_relationship_targets=risk.get('use_wave_relationship_targets', True),
+        use_volatility_sizing=risk.get('use_volatility_sizing', False),
+        volatility_threshold=risk.get('volatility_threshold', 0.03),
+        volatility_size_reduction=risk.get('volatility_size_reduction', 0.5),
+        use_volatility_filter=signals.get('use_volatility_filter', False),
+        volatility_max=signals.get('volatility_max', 0.02),
+        trade_fee_pct=costs.get('trade_fee_pct'),
+        trade_fee_absolute=costs.get('trade_fee_absolute'),
+        trade_fee_min=costs.get('trade_fee_min', TRADE_FEE_MIN),
+        trade_fee_max=costs.get('trade_fee_max', TRADE_FEE_MAX),
+        interest_rate_pa=costs.get('interest_rate_pa', 0.02),
         
         # Regime detection
         use_regime_detection=regime.get('use_regime_detection', False),
         invert_signals_in_bull=regime.get('invert_signals_in_bull', True),
         adx_threshold=regime.get('adx_threshold', 30.0),
+        regime_mode=regime.get('regime_mode', 'adx_ma'),
+        regime_vol_window=regime.get('vol_window', 20),
+        regime_vol_threshold=regime.get('vol_threshold', 0.015),
+        regime_slope_window=regime.get('slope_window', 5),
+        regime_slope_threshold=regime.get('slope_threshold', 0.0005),
         
         # Evaluation
         step_days=evaluation.get('step_days', STEP_DAYS),
         lookback_days=evaluation.get('lookback_days', LOOKBACK_DAYS),
+        initial_capital=float(evaluation.get('initial_capital', INITIAL_CAPITAL)),
         
         # Data
         column='Close',
@@ -188,27 +210,46 @@ def save_config_to_yaml(config: StrategyConfig, yaml_path: Union[str, Path]):
             'max_positions': config.max_positions,
             'max_positions_per_instrument': config.max_positions_per_instrument,
             'use_confidence_sizing': config.use_confidence_sizing,
-            'confidence_size_multiplier': config.confidence_size_multiplier,
             'use_flexible_sizing': config.use_flexible_sizing,
             'flexible_sizing_method': config.flexible_sizing_method,
             'flexible_sizing_target_rr': config.flexible_sizing_target_rr,
+            'use_wave_relationship_targets': config.use_wave_relationship_targets,
+            'use_volatility_sizing': config.use_volatility_sizing,
+            'volatility_threshold': config.volatility_threshold,
+            'volatility_size_reduction': config.volatility_size_reduction,
+        },
+        
+        'costs': {
+            'trade_fee_pct': config.trade_fee_pct,
+            'trade_fee_absolute': config.trade_fee_absolute,
+            'interest_rate_pa': config.interest_rate_pa,
         },
         
         'signals': {
             'signal_types': config.signal_types,
-            'require_all_indicators': config.require_all_indicators,
+            **({'min_confirmations': config.min_confirmations} if config.min_confirmations is not None else {}),
+            **({'min_certainty': config.min_certainty} if config.min_certainty is not None else {}),
             'use_trend_filter': config.use_trend_filter,
+            'indicator_weights': config.indicator_weights,
+            'use_volatility_filter': config.use_volatility_filter,
+            'volatility_max': config.volatility_max,
         },
         
         'regime': {
             'use_regime_detection': config.use_regime_detection,
             'invert_signals_in_bull': config.invert_signals_in_bull,
             'adx_threshold': config.adx_threshold,
+            'regime_mode': config.regime_mode,
+            'vol_window': config.regime_vol_window,
+            'vol_threshold': config.regime_vol_threshold,
+            'slope_window': config.regime_slope_window,
+            'slope_threshold': config.regime_slope_threshold,
         },
         
         'evaluation': {
             'step_days': config.step_days,
             'lookback_days': config.lookback_days,
+            'initial_capital': config.initial_capital,
         },
         
         'data': {

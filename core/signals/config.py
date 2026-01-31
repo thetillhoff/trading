@@ -6,28 +6,21 @@ All indicators (RSI, EMA, MACD, Elliott Wave) are treated equally.
 """
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
-import sys
-from pathlib import Path
 
-# Add paths for imports
-core_dir = Path(__file__).parent.parent.parent
-project_root = core_dir.parent
-sys.path.insert(0, str(project_root))
-
-# Import centralized defaults (single source of truth)
-from core.shared.defaults import (
+from ..shared.defaults import (
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
     EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     MACD_FAST, MACD_SLOW, MACD_SIGNAL,
     ELLIOTT_MIN_CONFIDENCE, ELLIOTT_MIN_WAVE_SIZE,
     ELLIOTT_INVERTED_MIN_CONFIDENCE, ELLIOTT_INVERTED_MIN_WAVE_SIZE,
     RISK_REWARD_RATIO, POSITION_SIZE_PCT, MAX_POSITIONS,
-    USE_CONFIDENCE_SIZING, CONFIDENCE_SIZE_MULTIPLIER,
+    USE_CONFIDENCE_SIZING,
     USE_CONFIRMATION_MODULATION, CONFIRMATION_SIZE_FACTORS,
     USE_FLEXIBLE_SIZING, FLEXIBLE_SIZING_METHOD, FLEXIBLE_SIZING_TARGET_RR,
-    MAX_POSITIONS_PER_INSTRUMENT,
+    MAX_POSITIONS_PER_INSTRUMENT, MIN_POSITION_SIZE,
+    TRADE_FEE_MIN, TRADE_FEE_MAX,
     USE_TREND_FILTER,
-    STEP_DAYS, LOOKBACK_DAYS,
+    STEP_DAYS, LOOKBACK_DAYS, INITIAL_CAPITAL,
 )
 
 
@@ -62,8 +55,25 @@ class SignalConfig:
     
     # Signal filtering
     signal_types: str = "all"  # "buy", "sell", or "all"
-    require_all_indicators: bool = False
+    min_confirmations: Optional[int] = None  # Require at least N indicator confirmations (None = no filter)
+    min_certainty: Optional[float] = None  # Require effective certainty >= this 0-1 (None = no filter)
     use_trend_filter: bool = USE_TREND_FILTER  # Only trade in direction of EMA trend
+
+    # Optional per-indicator weights for confirmation (rsi, ema, macd). If None, equal weight.
+    indicator_weights: Optional[Dict[str, float]] = None
+
+    # Regime detection (must match StrategyConfig when built from it in walk_forward)
+    use_regime_detection: bool = False
+    invert_signals_in_bull: bool = True
+    adx_threshold: float = 30.0
+    regime_mode: str = "adx_ma"
+    regime_vol_window: int = 20
+    regime_vol_threshold: float = 0.015
+    regime_slope_window: int = 5
+    regime_slope_threshold: float = 0.0005
+    # Volatility filter for confirmation
+    use_volatility_filter: bool = False
+    volatility_max: float = 0.02
 
 
 @dataclass
@@ -88,7 +98,6 @@ class StrategyConfig:
     use_rsi: bool = False
     use_ema: bool = False
     use_macd: bool = False
-    require_all_indicators: bool = False  # All enabled indicators must confirm
     
     # RSI parameters (from shared.defaults)
     rsi_period: int = RSI_PERIOD
@@ -106,12 +115,19 @@ class StrategyConfig:
     
     # Signal detection parameters
     signal_types: str = "all"  # "buy", "sell", or "all"
-    
+    min_confirmations: Optional[int] = None  # Require at least N indicator confirmations (None = no filter)
+    min_certainty: Optional[float] = None  # Require effective certainty >= this 0-1 (None = no filter)
+
+    # Optional per-indicator weights for confirmation (rsi, ema, macd). If None, equal weight.
+    indicator_weights: Optional[Dict[str, float]] = None
+
     # Target/stop-loss parameters (from shared.defaults)
     risk_reward: float = RISK_REWARD_RATIO
     use_atr_stops: bool = False  # Use ATR-based stops instead of fixed percentage
     atr_stop_multiplier: float = 2.0  # Stop loss = entry ± (multiplier × ATR)
     atr_period: int = 14  # Period for ATR calculation
+    # Whether to use wave-relationship-aware targets (all_waves) in TargetCalculator
+    use_wave_relationship_targets: bool = True
     
     # Trade evaluation parameters
     max_days: Optional[int] = None
@@ -120,17 +136,19 @@ class StrategyConfig:
     
     # Position sizing parameters (from shared.defaults)
     position_size_pct: float = POSITION_SIZE_PCT  # Base position size (% of capital)
-    max_positions: int = MAX_POSITIONS
+    max_positions: Optional[int] = MAX_POSITIONS  # None = unlimited when omitted in config
     
-    # Volatility-adjusted position sizing
+    # Volatility-adjusted position sizing (ATR/price)
     use_volatility_sizing: bool = False  # Adjust position size based on volatility (ATR)
     volatility_threshold: float = 0.03  # Reduce size when ATR/price > this threshold (3%)
     volatility_size_reduction: float = 0.5  # Multiply position size by this when volatile (50%)
+    # Volatility filter for confirmation (skip trade when 20d return std > threshold)
+    use_volatility_filter: bool = False  # Only confirm when volatility_20 below max
+    volatility_max: float = 0.02  # Max 20d return std to take trade (e.g. 2%)
     
     # Confidence-based position sizing (from shared.defaults)
     use_confidence_sizing: bool = USE_CONFIDENCE_SIZING  # Scale position size with indicator confirmations
-    confidence_size_multiplier: float = CONFIDENCE_SIZE_MULTIPLIER  # Additional % per confirmation
-    
+
     # Confirmation-based position sizing modulation (from shared.defaults)
     use_confirmation_modulation: bool = USE_CONFIRMATION_MODULATION  # Multiplicative sizing based on confirmations
     confirmation_size_factors: Dict[int, float] = field(default_factory=lambda: CONFIRMATION_SIZE_FACTORS.copy())
@@ -142,6 +160,18 @@ class StrategyConfig:
     
     # Per-instrument position limits
     max_positions_per_instrument: Optional[int] = MAX_POSITIONS_PER_INSTRUMENT  # None = no limit, otherwise max positions per instrument
+
+    # Minimal position size (absolute; None = no minimum). Skip opening if position capital < this.
+    min_position_size: Optional[float] = MIN_POSITION_SIZE
+
+    # Trading costs (applied per side: entry and exit)
+    trade_fee_pct: Optional[float] = None  # e.g. 0.001 for 0.1% of trade value per side
+    trade_fee_absolute: Optional[float] = None  # e.g. 1.0 per trade per side
+    trade_fee_min: Optional[float] = TRADE_FEE_MIN  # Minimum fee per side (absolute); clamp when set
+    trade_fee_max: Optional[float] = TRADE_FEE_MAX  # Maximum fee per side (absolute); clamp when set
+
+    # Cash/interest: % p.a. that non-invested money earns (daily accrual, month-end compound; 0 = no interest)
+    interest_rate_pa: float = 0.02  # e.g. 0.02 for 2% p.a.
     
     # Trend filtering (from shared.defaults)
     use_trend_filter: bool = USE_TREND_FILTER  # Only trade in direction of EMA trend
@@ -150,11 +180,21 @@ class StrategyConfig:
     use_regime_detection: bool = False  # Enable market regime detection (ADX + MA slope)
     invert_signals_in_bull: bool = True  # Invert EW signals in bull markets (counter-trend trading)
     adx_threshold: float = 30.0  # ADX threshold for regime detection (default: 30)
+    # Regime model selection
+    # - "adx_ma": current ADX + MA-slope classifier
+    # - "trend_vol": close-only classifier using MA slope + return volatility
+    regime_mode: str = "adx_ma"
+    # trend_vol parameters (close-only)
+    regime_vol_window: int = 20
+    regime_vol_threshold: float = 0.015  # daily return std threshold (~1.5%) used to downweight BULL classification
+    regime_slope_window: int = 5  # slope window (days) for MA slope
+    regime_slope_threshold: float = 0.0005  # abs(slope)/price below this => SIDEWAYS
     
     # Walk-forward parameters (from shared.defaults)
     step_days: int = STEP_DAYS
     lookback_days: int = LOOKBACK_DAYS
-    
+    initial_capital: float = INITIAL_CAPITAL  # Starting portfolio capital for backtest
+
     # Data parameters
     column: str = "Close"
     granularity: str = "daily"
@@ -176,16 +216,14 @@ BASELINE_CONFIG = StrategyConfig(
     use_rsi=True,            # Combined with EW: +28.71% alpha (standalone RSI fails)
     use_ema=True,            # Combined with EW: improves signal quality
     use_macd=True,           # Combined with EW: +25.71% alpha (best win rate: 49.1%)
-    require_all_indicators=False,
     signal_types="all",      # Allow both buy and sell signals
     risk_reward=RISK_REWARD_RATIO,  # 2.0 - validated optimal
     max_days=None,
     require_both_targets=False,
     hold_through_stop_loss=False,
     position_size_pct=POSITION_SIZE_PCT,        # 0.2 (20% per trade)
-    max_positions=MAX_POSITIONS,                # 5 concurrent positions
+    max_positions=MAX_POSITIONS,                # None = unlimited when omitted
     use_confidence_sizing=USE_CONFIDENCE_SIZING,  # True (scale with confidence)
-    confidence_size_multiplier=CONFIDENCE_SIZE_MULTIPLIER,  # 0.1 (+10% per confirmation)
     step_days=STEP_DAYS,          # 1 (daily evaluation)
     lookback_days=LOOKBACK_DAYS,  # 365 days
     column="Close",
@@ -302,8 +340,7 @@ def generate_grid_configs(
         # Risk management parameters (test alternatives - default 2.0/0.2/5/0.1 is baseline)
         risk_reward_params = [1.5, 2.5, 3.0]  # Default 2.0 is baseline
         position_size_params = [0.1, 0.3, 0.4]  # Default 0.2 (20%) is baseline
-        max_positions_params = [3, 7, 10]  # Default 5 is baseline
-        confidence_multiplier_params = [0.05, 0.15, 0.2]  # Default 0.1 is baseline
+        max_positions_params = [3, 7, 10]  # Grid tests these; default None = unlimited
     else:
         # Single default value for each (from shared.defaults - single source of truth)
         elliott_params = [{"min_confidence": ELLIOTT_MIN_CONFIDENCE, "min_wave_size": ELLIOTT_MIN_WAVE_SIZE}]
@@ -313,7 +350,6 @@ def generate_grid_configs(
         risk_reward_params = [RISK_REWARD_RATIO]
         position_size_params = [POSITION_SIZE_PCT]
         max_positions_params = [MAX_POSITIONS]
-        confidence_multiplier_params = [CONFIDENCE_SIZE_MULTIPLIER]
     
     configs = []
     
@@ -417,7 +453,6 @@ def generate_grid_configs(
                                     'risk_reward': RISK_REWARD_RATIO,
                                     'position_size_pct': POSITION_SIZE_PCT,
                                     'max_positions': MAX_POSITIONS,
-                                    'confidence_size_multiplier': CONFIDENCE_SIZE_MULTIPLIER,
                                 }
                             ]
                             
@@ -430,7 +465,6 @@ def generate_grid_configs(
                                             'risk_reward': rr,
                                             'position_size_pct': POSITION_SIZE_PCT,
                                             'max_positions': MAX_POSITIONS,
-                                            'confidence_size_multiplier': CONFIDENCE_SIZE_MULTIPLIER,
                                         })
                                 
                                 for ps in position_size_params:
@@ -439,7 +473,6 @@ def generate_grid_configs(
                                             'risk_reward': RISK_REWARD_RATIO,
                                             'position_size_pct': ps,
                                             'max_positions': MAX_POSITIONS,
-                                            'confidence_size_multiplier': CONFIDENCE_SIZE_MULTIPLIER,
                                         })
                                 
                                 for mp in max_positions_params:
@@ -448,16 +481,6 @@ def generate_grid_configs(
                                             'risk_reward': RISK_REWARD_RATIO,
                                             'position_size_pct': POSITION_SIZE_PCT,
                                             'max_positions': mp,
-                                            'confidence_size_multiplier': CONFIDENCE_SIZE_MULTIPLIER,
-                                        })
-                                
-                                for cm in confidence_multiplier_params:
-                                    if cm != CONFIDENCE_SIZE_MULTIPLIER:
-                                        risk_params_list.append({
-                                            'risk_reward': RISK_REWARD_RATIO,
-                                            'position_size_pct': POSITION_SIZE_PCT,
-                                            'max_positions': MAX_POSITIONS,
-                                            'confidence_size_multiplier': cm,
                                         })
                             
                             # Generate config for each risk management parameter set
@@ -495,9 +518,8 @@ def generate_grid_configs(
                                 if risk_params['position_size_pct'] != POSITION_SIZE_PCT:
                                     param_parts.append(f"ps{int(risk_params['position_size_pct']*100)}")
                                 if risk_params['max_positions'] != MAX_POSITIONS:
-                                    param_parts.append(f"mp{risk_params['max_positions']}")
-                                if risk_params['confidence_size_multiplier'] != CONFIDENCE_SIZE_MULTIPLIER:
-                                    param_parts.append(f"cm{risk_params['confidence_size_multiplier']:.2f}")
+                                    mp_val = risk_params['max_positions']
+                                    param_parts.append(f"mp{mp_val}" if mp_val is not None else "mp_unlimited")
                                 
                                 if param_parts:
                                     name = f"{base_name}_{'_'.join(param_parts)}"
@@ -529,7 +551,6 @@ def generate_grid_configs(
                                     use_rsi=use_rsi,
                                     use_ema=use_ema,
                                     use_macd=use_macd,
-                                    require_all_indicators=False,
                                     rsi_period=rsi_p.get('rsi_period', RSI_PERIOD) if rsi_p else RSI_PERIOD,
                                     rsi_oversold=rsi_p.get('rsi_oversold', RSI_OVERSOLD) if rsi_p else RSI_OVERSOLD,
                                     rsi_overbought=rsi_p.get('rsi_overbought', RSI_OVERBOUGHT) if rsi_p else RSI_OVERBOUGHT,
@@ -546,7 +567,6 @@ def generate_grid_configs(
                                     position_size_pct=risk_params['position_size_pct'],
                                     max_positions=risk_params['max_positions'],
                                     use_confidence_sizing=USE_CONFIDENCE_SIZING,
-                                    confidence_size_multiplier=risk_params['confidence_size_multiplier'],
                                     step_days=STEP_DAYS,
                                     lookback_days=LOOKBACK_DAYS,
                                     column="Close",

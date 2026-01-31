@@ -13,10 +13,13 @@ Covers:
 import pytest
 import pandas as pd
 import numpy as np
+from typing import Optional
 
 from core.signals.detector import SignalDetector
 from core.signals.config import SignalConfig
-from core.shared.types import SignalType
+from core.shared.types import SignalType, TradingSignal
+from core.indicators.elliott_wave import Wave, WaveType, WaveLabel
+from types import SimpleNamespace
 
 
 def _config(use_elliott_wave: bool, use_elliott_wave_inverted: bool, use_elliott_wave_inverted_exit: bool = False, min_confidence: float = 0.0, min_confidence_inverted: float = 0.0, min_wave_size: float = 0.0, min_wave_size_inverted: float = 0.0):
@@ -99,8 +102,8 @@ class TestInvertedElliottWave:
         det_normal = SignalDetector(config_normal)
         det_inverted = SignalDetector(config_inverted)
 
-        normal_signals = det_normal._get_elliott_wave_signals(data, None)
-        inverted_signals = det_inverted._get_inverted_elliott_wave_signals(data, None)
+        normal_signals, _ = det_normal._get_elliott_wave_signals(data, None)
+        inverted_signals, _ = det_inverted._get_inverted_elliott_wave_signals(data, None)
 
         def key(s):
             return (s.timestamp, s.signal_type.name)
@@ -114,7 +117,7 @@ class TestInvertedElliottWave:
         data = asymmetric_prices
         config = _config(use_elliott_wave=False, use_elliott_wave_inverted=True, min_confidence_inverted=0.0, min_wave_size_inverted=0.0)
         det = SignalDetector(config)
-        signals = det._get_inverted_elliott_wave_signals(data, None)
+        signals, _ = det._get_inverted_elliott_wave_signals(data, None)
         for s in signals:
             assert s.source in ("elliott_inverted", "combined_inverted")
 
@@ -152,7 +155,7 @@ class TestRegularElliottWave:
         data = asymmetric_prices
         config = _config(use_elliott_wave=True, use_elliott_wave_inverted=False, min_confidence=0.0, min_wave_size=0.0)
         det = SignalDetector(config)
-        signals = det._get_elliott_wave_signals(data, None)
+        signals, _ = det._get_elliott_wave_signals(data, None)
         for s in signals:
             assert s.source in ("elliott", "combined")
             assert "Wave" in s.reasoning or "correction" in s.reasoning
@@ -208,3 +211,225 @@ class TestTechnicalIndicatorSignals:
         assert rsi_set != ema_set
         assert rsi_set != macd_set
         assert ema_set != macd_set
+
+
+class TestRegimeDetection:
+    def test_invert_signals_in_bull_is_honored_for_ew_signals(self):
+        dates = pd.date_range("2020-01-01", periods=50, freq="D")
+        prices = pd.Series(np.linspace(100, 150, 50), index=dates)
+
+        wave = Wave(
+            start_idx=0,
+            end_idx=10,
+            start_price=float(prices.iloc[0]),
+            end_price=float(prices.iloc[10]),
+            wave_type=WaveType.IMPULSE,
+            label=WaveLabel.WAVE_2,
+            direction="up",
+            confidence=1.0,
+        )
+
+        # Regime on, but inversion disabled => keep original BUY on BULL
+        cfg_no_invert = SimpleNamespace(
+            use_regime_detection=True,
+            invert_signals_in_bull=False,
+            use_rsi=False,
+            use_ema=False,
+            use_macd=False,
+        )
+        det_no_invert = SignalDetector(cfg_no_invert)
+        sig_no_invert = det_no_invert._wave_to_signal(wave, prices, indicator_df=None, market_regime="BULL")
+        assert sig_no_invert is not None
+        assert sig_no_invert.signal_type == SignalType.BUY
+
+        # Regime on, inversion enabled => invert BUY->SELL on BULL
+        cfg_invert = SimpleNamespace(
+            use_regime_detection=True,
+            invert_signals_in_bull=True,
+            use_rsi=False,
+            use_ema=False,
+            use_macd=False,
+        )
+        det_invert = SignalDetector(cfg_invert)
+        sig_invert = det_invert._wave_to_signal(wave, prices, indicator_df=None, market_regime="BULL")
+        assert sig_invert is not None
+        assert sig_invert.signal_type == SignalType.SELL
+
+    def test_regime_mode_dispatches_to_correct_classifier(self):
+        ts = pd.Timestamp("2020-01-10")
+        indicator_df = pd.DataFrame(
+            {
+                "price": [100.0],
+                "adx": [50.0],
+                "ma_slope": [1.0],
+                "volatility_20": [0.01],
+            },
+            index=[ts],
+        )
+        prices = pd.Series([100.0], index=[ts])
+
+        cfg = SimpleNamespace(
+            use_regime_detection=True,
+            regime_mode="trend_vol",
+        )
+        det = SignalDetector(cfg)
+
+        det._detect_market_regime_trend_vol = lambda df, t: "CALLED_TREND_VOL"
+        det._detect_market_regime_adx_ma = lambda df, t: "CALLED_ADX_MA"
+
+        assert det._detect_market_regime(prices, indicator_df, ts) == "CALLED_TREND_VOL"
+
+        cfg.regime_mode = "adx_ma"
+        assert det._detect_market_regime(prices, indicator_df, ts) == "CALLED_ADX_MA"
+
+
+class TestVolatilityFilter:
+    """Volatility filter: when use_volatility_filter and volatility_20 > volatility_max, confirmation is False."""
+
+    def test_volatility_filter_rejects_high_vol(self):
+        """When volatility_20 > volatility_max, _check_indicator_confirmation returns (False, ..., 0, ...)."""
+        config = SignalConfig(
+            use_elliott_wave=False,
+            use_rsi=True,
+            use_ema=False,
+            use_macd=False,
+            use_volatility_filter=True,
+            volatility_max=0.01,
+        )
+        detector = SignalDetector(config)
+        ts = pd.Timestamp("2020-06-15")
+        # Row with high vol (0.02 > 0.01) but RSI would confirm buy
+        row = {
+            "price": 100.0,
+            "rsi": 30.0,
+            "rsi_oversold": True,
+            "rsi_overbought": False,
+            "ema_short": 99.0,
+            "ema_long": 98.0,
+            "price_above_ema_short": True,
+            "price_above_ema_long": True,
+            "ema_bullish_cross": False,
+            "ema_bearish_cross": False,
+            "macd_line": 0.1,
+            "macd_signal": 0.05,
+            "macd_histogram": 0.05,
+            "macd_bullish": True,
+            "macd_bearish": False,
+            "atr": 2.0,
+            "atr_pct": 0.02,
+            "volatility_20": 0.02,
+        }
+        indicator_df = pd.DataFrame([row], index=[ts])
+        signal = TradingSignal(timestamp=ts, signal_type=SignalType.BUY, price=100.0, confidence=0.0, reasoning="test")
+        confirmed, reason, count, _ = detector._check_indicator_confirmation(signal, indicator_df)
+        assert confirmed is False
+        assert "Volatility too high" in reason
+        assert count == 0
+
+    def test_volatility_filter_allows_low_vol(self):
+        """When volatility_20 <= volatility_max, confirmation proceeds (RSI can confirm)."""
+        config = SignalConfig(
+            use_elliott_wave=False,
+            use_rsi=True,
+            use_ema=False,
+            use_macd=False,
+            use_volatility_filter=True,
+            volatility_max=0.03,
+        )
+        detector = SignalDetector(config)
+        ts = pd.Timestamp("2020-06-15")
+        row = {
+            "price": 100.0,
+            "rsi": 30.0,
+            "rsi_oversold": True,
+            "rsi_overbought": False,
+            "ema_short": 99.0,
+            "ema_long": 98.0,
+            "price_above_ema_short": True,
+            "price_above_ema_long": True,
+            "ema_bullish_cross": False,
+            "ema_bearish_cross": False,
+            "macd_line": 0.1,
+            "macd_signal": 0.05,
+            "macd_histogram": 0.05,
+            "macd_bullish": True,
+            "macd_bearish": False,
+            "atr": 2.0,
+            "atr_pct": 0.02,
+            "volatility_20": 0.01,
+        }
+        indicator_df = pd.DataFrame([row], index=[ts])
+        signal = TradingSignal(timestamp=ts, signal_type=SignalType.BUY, price=100.0, confidence=0.0, reasoning="test")
+        confirmed, reason, count, _ = detector._check_indicator_confirmation(signal, indicator_df)
+        assert confirmed is True
+        assert count >= 1
+
+
+class TestFilterSignalsByQuality:
+    """Min confirmations and min certainty filter in detector."""
+
+    def _make_signal(self, confirmations: int, confirmation_score: Optional[float] = None, ts=None):
+        if ts is None:
+            ts = pd.Timestamp("2020-06-01")
+        sig = TradingSignal(
+            signal_type=SignalType.BUY,
+            timestamp=ts,
+            price=100.0,
+            confidence=0.5,
+            reasoning="test",
+            indicator_confirmations=confirmations,
+            confirmation_score=confirmation_score,
+        )
+        return sig
+
+    def test_min_confirmations_filters(self):
+        """With min_confirmations=2 only signals with >=2 confirmations pass."""
+        config = _technical_config(use_rsi=True, use_ema=True, use_macd=True)
+        config.min_confirmations = 2
+        config.min_certainty = None
+        detector = SignalDetector(config)
+        signals = [
+            self._make_signal(0),
+            self._make_signal(1),
+            self._make_signal(2),
+            self._make_signal(3),
+        ]
+        result = detector._filter_signals_by_quality(signals)
+        assert len(result) == 2
+        assert all(getattr(s, 'indicator_confirmations', 0) >= 2 for s in result)
+
+    def test_min_certainty_filters(self):
+        """With min_certainty=0.66 only signals with effective certainty >= 0.66 pass."""
+        config = _technical_config(use_rsi=True, use_ema=True, use_macd=True)
+        config.min_confirmations = None
+        config.min_certainty = 0.66
+        detector = SignalDetector(config)
+        # Use confirmation_score when set, else count/3 -> 0.5 and 0.7
+        low = self._make_signal(1, confirmation_score=0.5)
+        high = self._make_signal(2, confirmation_score=0.7)
+        signals = [low, high]
+        result = detector._filter_signals_by_quality(signals)
+        assert len(result) == 1
+        assert result[0].confirmation_score == 0.7
+
+    def test_min_certainty_uses_count_when_no_score(self):
+        """When confirmation_score is None, effective certainty is indicator_confirmations/3."""
+        config = _technical_config(use_rsi=True, use_ema=True, use_macd=True)
+        config.min_confirmations = None
+        config.min_certainty = 0.66  # 2/3 = 0.666... passes, 1/3 does not
+        detector = SignalDetector(config)
+        one_conf = self._make_signal(1, confirmation_score=None)   # 1/3 < 0.66
+        two_conf = self._make_signal(2, confirmation_score=None)  # 2/3 >= 0.66
+        result = detector._filter_signals_by_quality([one_conf, two_conf])
+        assert len(result) == 1
+        assert result[0].indicator_confirmations == 2
+
+    def test_no_filter_when_both_none(self):
+        """When min_confirmations and min_certainty are None, no signals dropped."""
+        config = _technical_config(use_rsi=True, use_ema=True, use_macd=True)
+        config.min_confirmations = None
+        config.min_certainty = None
+        detector = SignalDetector(config)
+        signals = [self._make_signal(0), self._make_signal(3)]
+        result = detector._filter_signals_by_quality(signals)
+        assert len(result) == 2
