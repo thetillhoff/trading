@@ -20,15 +20,13 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 ### High Priority
 
 - **restructure signals configuration**: Use a single configuration for indicators. If an indicator should be used, it has to be configured; if it's missing, it's not used. A minimal configuration contains at least a weight for the indicator and the necessary parameters. Filtering is via weighted score or min_confirmations/min_certainty.
+  - This might affect the structure of this repo. From my understanding, the elliot wave config is used to generate signals. These are then filtered by the signal/indicator configuration. And then, based on those results, and other criteria, the position size is calculated. Only then, the trade is executed. Please create a flow diagram of the current process, vs this one. Note down pros and cons if there are differences.
 
-- **asset analysis:**
-  - Create a separate project for asset analysis. It's meant to find the best assets/instruments to use for trading.
-  - Retrieve list of available assets/instruments and their metadata.
-  - Retrieve data of available assets/instruments and analyze them.
-  - Try to find common patterns and relationships between them.
-  - Analyze their metadata, like market cap, company size, company ratings, etc.
-  The goal is to identify metrics what makes an asset/instrument a good candidate for trading.
-  And to prepare to add many more assets/instruments to the trading strategy.
+- **asset analysis pt 2:**
+  - Backtest scoring: run per-instrument backtest (e.g. baseline single-instrument), rank by return/Sharpe; optional flag (e.g. --backtest-score).
+  - improve candidate filtering: add description of asset/company. fill gaps or remove those candidates. add some trading data like OHLCV etc, also export to same csv.
+
+- **incorporate more data into algorithm:** Currently, only daily close data is used. Add more data like open, high, low, volume, etc. that's daily, and maybe even intraday data.
 
 - **implement IBKR API**: Implement the IBKR API to get real-time data and execute trades. Sandbox first.
 
@@ -38,11 +36,11 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 
 - **Exchange Traded Commodities:** Implement Exchange Traded Commodities (ETCs) as instruments. Add a few big ones, but only the physically backed ones.
 
-- **Time-based trade constraints:** Min-holding time per trade; time-based stops (exit after N days).
+- **Time-based trade constraints:** Min-holding time per trade; time-based stops (exit after N days). Use this to filter out trades that are too short-lived.
 - **Indicator usage beyond confirmation:** Extend weighting to risk/stop-loss or other metrics (confirmation weighting already in baseline).
 
 - **Hypothesis: Signal quality on full period (2000–2020):** Same signal_quality / conf×cert configs with start 2000, end 2020; confirm optimal min_certainty / min_confirmations over longer span.
-- **Hypothesis: Multi-instrument with min_certainty:** Compare baseline multi-instrument vs variants with min_certainty 0.5 / 0.66; does selectivity improve multi-instrument results?
+- **Hypothesis: Multi-instrument with min_certainty:** Compare different values of. For example min_certainty 0.5 / 0.66; does selectivity improve multi-instrument results?
 
 ### Medium Priority – Config and code quality
 
@@ -51,12 +49,14 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
     - Find unused code, make targets, tests, etc.
     - Suggest code- & test- & all other noteworthy improvements.
     - Suggest simplifications.
-    - Suggest performance improvements.
+    - Suggest performance improvements. For example a way to parallelize the computation of all indicators, so it can leverage multiple cores.
     - Suggest new features.
     - Suggest strategy improvements.
     - Suggest improvements to AGENTS.md and DEVELOPMENT.md and the other markdown files.
   - Add your findings in this ROADMAP.md file.
   - "Clean up"/improve docstrings right away.
+
+- **update readme:** Update the README.md file to reflect the current state of the project.
 
 - **Custom signal rules:** Configurable rules without code changes; rule engine; indicator weights/priorities (partially covered by signal quality above).
 - **Config splitting:** Break StrategyConfig into sub-configs (Execution, Indicator, Risk) in the same file.
@@ -144,7 +144,6 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 
 ### Performance optimization opportunities (monitoring done)
 
-- **Optimization:** Data is already loaded once per instrument (no per-step disk reads). Indicator calculation runs per (eval_date, instrument) slice from scratch; optional caching by (instrument, end_date) could avoid duplicate work for identical slices. Elliott Wave and target calculation have no shared cache; vectorizing/numba on hot paths only if profiling justifies.
 - **Parallelization:** Per-indicator: run RSI, EMA, MACD, ADX, ATR in parallel inside `TechnicalIndicators.calculate_all`. Per-instrument: run instrument loop inside each eval_date in parallel (merge signals afterward).
 
 ### Advanced Features (Experimental)

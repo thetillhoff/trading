@@ -47,8 +47,8 @@ Examples:
     
     parser.add_argument(
         "--instrument", "-i",
-        default="djia",
-        help="Instrument to evaluate (default: djia). Dates are always taken from configs.",
+        default=None,
+        help="Override config instruments with this one (e.g. djia). If omitted, each config uses its own instruments/dates.",
     )
     parser.add_argument(
         "--column",
@@ -132,16 +132,16 @@ Examples:
     
     print(f"  Loaded {len(configs)} configurations from {len(yaml_files)} files")
     
-    # Apply CLI arguments to YAML-loaded configs (instrument only; dates always from config)
-    if args.instrument:
+    # Apply CLI instrument override only when explicitly passed (otherwise each config keeps its own instruments)
+    if args.instrument is not None:
         print(f"  Using CLI instrument (overrides config): {args.instrument}")
         for config in configs:
             config.instruments = [args.instrument]
-    
-    # Validate all configs have required fields (dates from config only; defaults if missing)
+
+    # Validate: configs with no instruments get default (e.g. list_available_tickers() may have returned [])
     for config in configs:
         if not config.instruments:
-            config.instruments = ["djia"]  # Default
+            config.instruments = ["djia"]  # Fallback when no instruments in config and no CLI override
         if not config.start_date:
             print(f"Warning: Config '{config.name}' missing start_date, using 2000-01-01")
             config.start_date = "2000-01-01"

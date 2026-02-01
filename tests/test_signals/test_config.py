@@ -3,6 +3,7 @@ Tests for strategy configuration.
 """
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from core.signals.config import StrategyConfig, BASELINE_CONFIG, generate_grid_configs
@@ -120,5 +121,99 @@ data:
             config = load_config_from_yaml(path)
             assert config.min_confirmations == 2
             assert config.min_certainty == 0.66
+        finally:
+            path.unlink(missing_ok=True)
+
+
+class TestConfigLoaderInstrumentsDefault:
+    """When data.instruments is missing or empty, config uses all tickers in data/tickers/."""
+
+    def test_empty_instruments_uses_list_available_tickers(self):
+        """YAML with instruments: [] or no data.instruments → config.instruments from list_available_tickers()."""
+        yaml_content = """
+name: test_tickers
+description: test
+indicators:
+  elliott_wave: { enabled: false }
+  rsi: { enabled: true }
+  ema: { enabled: false }
+  macd: { enabled: false }
+risk: {}
+signals: { signal_types: all }
+regime: { use_regime_detection: false }
+costs: {}
+evaluation: { step_days: 1, lookback_days: 365 }
+data:
+  instruments: []
+  start_date: '2000-01-01'
+  end_date: '2020-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            with patch('core.signals.config_loader.list_available_tickers', return_value=['A', 'B', 'NVDA']):
+                config = load_config_from_yaml(path)
+            assert config.instruments == ['A', 'B', 'NVDA']
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_missing_instruments_uses_list_available_tickers(self):
+        """YAML with no data.instruments key → config.instruments from list_available_tickers()."""
+        yaml_content = """
+name: test_tickers
+description: test
+indicators:
+  elliott_wave: { enabled: false }
+  rsi: { enabled: true }
+  ema: { enabled: false }
+  macd: { enabled: false }
+risk: {}
+signals: { signal_types: all }
+regime: { use_regime_detection: false }
+costs: {}
+evaluation: { step_days: 1, lookback_days: 365 }
+data:
+  start_date: '2000-01-01'
+  end_date: '2020-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            with patch('core.signals.config_loader.list_available_tickers', return_value=['X', 'Y']):
+                config = load_config_from_yaml(path)
+            assert config.instruments == ['X', 'Y']
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_explicit_instruments_unchanged(self):
+        """YAML with data.instruments: [djia] keeps [djia], does not call list_available_tickers."""
+        yaml_content = """
+name: test_explicit
+description: test
+indicators:
+  elliott_wave: { enabled: false }
+  rsi: { enabled: true }
+  ema: { enabled: false }
+  macd: { enabled: false }
+risk: {}
+signals: { signal_types: all }
+regime: { use_regime_detection: false }
+costs: {}
+evaluation: { step_days: 1, lookback_days: 365 }
+data:
+  instruments: [djia]
+  start_date: '2000-01-01'
+  end_date: '2020-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            with patch('core.signals.config_loader.list_available_tickers') as m:
+                config = load_config_from_yaml(path)
+            m.assert_not_called()
+            assert config.instruments == ['djia']
         finally:
             path.unlink(missing_ok=True)

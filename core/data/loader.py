@@ -8,9 +8,17 @@ Loads data from scraper CSV files with support for:
 """
 import pandas as pd
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Union
 from datetime import datetime
+from .download import TICKERS_DIR
 from .scraper import list_instruments
+
+
+def list_available_tickers() -> List[str]:
+    """Return sorted list of ticker symbols from data/tickers/ (CSV stems). Empty if dir missing."""
+    if not TICKERS_DIR.exists():
+        return []
+    return sorted(p.stem for p in TICKERS_DIR.glob("*.csv"))
 
 
 class DataLoader:
@@ -104,7 +112,35 @@ class DataLoader:
         """
         loader = cls.from_scraper(instrument_name)
         return loader.load(start_date=start_date, end_date=end_date, column=column)
-    
+
+    @classmethod
+    def from_ticker(
+        cls,
+        ticker: str,
+        start_date: Optional[Union[str, datetime, pd.Timestamp]] = None,
+        end_date: Optional[Union[str, datetime, pd.Timestamp]] = None,
+        column: Optional[str] = None,
+    ) -> Union[pd.DataFrame, pd.Series]:
+        """
+        Load OHLCV for a discovered ticker from data/tickers/{ticker}.csv.
+
+        Args:
+            ticker: Yahoo Finance ticker symbol (e.g. AAPL, BRK-B).
+            start_date: Start date for filtering (inclusive).
+            end_date: End date for filtering (inclusive).
+            column: If specified, return Series for this column.
+
+        Returns:
+            DataFrame or Series with filtered data.
+        """
+        path = TICKERS_DIR / f"{ticker}.csv"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Data file not found for ticker '{ticker}': {path}. "
+                "Run asset-analysis with --all-assets --analyze (or download tickers first)."
+            )
+        return cls(path).load(start_date=start_date, end_date=end_date, column=column)
+
     @classmethod
     def from_scraper(cls, instrument_name: str) -> 'DataLoader':
         """
@@ -137,13 +173,13 @@ class DataLoader:
             if path.exists():
                 data_path = path
                 break
-        
-        if not data_path.exists():
+        if data_path is None and (TICKERS_DIR / data_filename).exists():
+            data_path = TICKERS_DIR / data_filename
+        if data_path is None:
             available = list_instruments()
             raise FileNotFoundError(
-                f"Data file not found for instrument '{instrument_name}': {data_path}\n"
-                f"Available instruments: {available}\n"
-                f"Run: python -m core.data.scraper {instrument_name}"
+                f"Data file not found for instrument '{instrument_name}'. "
+                f"Named instruments: {available}. "
+                f"For tickers (e.g. NVDA), ensure data/tickers/{instrument_name}.csv exists (run --download-candidates)."
             )
-        
         return cls(data_path)

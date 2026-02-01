@@ -11,6 +11,7 @@ from dataclasses import asdict
 
 from .config import StrategyConfig
 from ..shared.defaults import *
+from ..data.loader import list_available_tickers
 
 
 def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
@@ -65,6 +66,11 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
     
     # Data & execution parameters
     data_params = config_dict.get('data', {})
+    raw_instruments = data_params.get('instruments')
+    if raw_instruments is None or (isinstance(raw_instruments, list) and len(raw_instruments) == 0):
+        instruments = list_available_tickers()
+    else:
+        instruments = raw_instruments if isinstance(raw_instruments, list) else [raw_instruments]
 
     # Trading costs
     costs = config_dict.get('costs', {})
@@ -150,7 +156,7 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         # Data
         column='Close',
         granularity='daily',
-        instruments=data_params.get('instruments', ['djia']),
+        instruments=instruments,
         start_date=data_params.get('start_date'),
         end_date=data_params.get('end_date'),
     )

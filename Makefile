@@ -1,4 +1,4 @@
-.PHONY: help clean download evaluate grid-search test test-cov baseline-snapshot-generate hypothesis-long-short hypothesis-pretrade
+.PHONY: help clean download evaluate grid-search asset-analysis test test-cov baseline-snapshot-generate hypothesis-long-short hypothesis-pretrade
 
 # Default target
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "  make evaluate              Evaluate a strategy (default: baseline.yaml, generates charts)"
 	@echo "  make grid-search           Compare multiple configs from configs/ (auto-parallel, auto-charts)"
 	@echo "  make hypothesis-tests      Run multi-period hypothesis suites (category/period selection)"
+	@echo "  make asset-analysis        Run asset analysis (metadata, vol/correlation, candidate ranking; cache-first)"
 	@echo "  make test                  Run tests with pytest"
 	@echo "  make test-cov              Run tests with coverage report (development only)"
 	@echo "  make baseline-snapshot-generate  Create/refresh baseline trades snapshot (2012; for regression test)"
@@ -27,12 +28,19 @@ help:
 	@echo "  make grid-search ARGS='--config-dir configs/optimization'  # Test specific subdirectory"
 	@echo "  make grid-search ARGS='--output-dir results/my_run ...'    # Direct outputs to a path (e.g. for hypothesis-test flows)"
 	@echo "  make grid-search ARGS='--analyze results/hypothesis_tests_YYYYMMDD/'  # Run analysis only on an existing results dir"
+	@echo "  make asset-analysis ARGS='--fetch-metadata --analyze'  # Fetch metadata then run full analysis (cache-first)"
+	@echo "  make asset-analysis ARGS='--all-assets --fetch-metadata --analyze'  # Metadata + OHLCV for all (cache-first), full ranking"
+	@echo "  make asset-analysis ARGS='--all-assets --fetch-metadata --analyze --top 100'  # Same, write only top 100 to ranking CSVs"
+	@echo "  make asset-analysis ARGS='--download-candidates'  # Download OHLCV for all in data/asset_analysis/candidate_ranking.csv"
+	@echo "  make asset-analysis ARGS='--download-candidates --top 10'  # Download OHLCV for top 10 rows only"
 	@echo ""
 	@echo "Hypothesis tests (multi-period + analysis):"
 	@echo "  make hypothesis-tests ARGS='--category rsi_tests --period quick_test'  # Run hypothesis suite via cli.hypothesis"
 	@echo ""
 	@echo "Data Directory:"
 	@echo "  ./data/                    Downloaded market data (created by download command)"
+	@echo "  ./data/tickers/             OHLCV for discovered tickers (asset-analysis --download-candidates)"
+	@echo "  ./data/asset_analysis/      Asset analysis outputs (candidate_ranking, volatility, correlation; not strategy results)"
 	@echo ""
 	@echo "Results:"
 	@echo "  ./results/                 Per-config results (matching configs/ structure)"
@@ -63,6 +71,9 @@ grid-search:
 
 hypothesis-tests:
 	$(DOCKER_CLI) cli.hypothesis $(ARGS)
+
+asset-analysis:
+	$(DOCKER_CLI) cli.asset_analysis $(ARGS)
 
 # Testing
 test:

@@ -20,6 +20,10 @@ See all available commands:
 
 ```bash
 make help
+
+# Download top 100 instrument candidates from ~500 available
+make asset-analysis ARGS='--all-assets --fetch-metadata --analyze --top 100'
+
 ```
 
 ## Architecture

@@ -6,7 +6,7 @@ import argparse
 import warnings
 import pandas as pd
 import yfinance as yf
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from pathlib import Path
 
 # Suppress yfinance's pandas deprecation warnings (will be fixed in future yfinance version)
@@ -15,6 +15,7 @@ warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
 # Get the directory where this module is located
 MODULE_DIR = Path(__file__).parent
 DATA_DIR = MODULE_DIR.parent.parent / "data"  # Store data in project root /data
+TICKERS_DIR = DATA_DIR / "tickers"  # OHLCV cache for discovered tickers (e.g. --all-assets)
 
 # Instrument definitions: name -> (yahoo_ticker, description)
 INSTRUMENTS: Dict[str, tuple] = {
@@ -178,6 +179,107 @@ def download_instrument(
     except Exception as e:
         print(f"  Error downloading {name}: {e}")
         return None
+
+
+def download_ticker(
+    ticker: str,
+    force_refresh: bool = False,
+    start_date: str = "1990-01-01",
+    quiet: bool = False,
+    update_stale: bool = False,
+) -> Tuple[Optional[pd.DataFrame], bool]:
+    """
+    Download OHLCV for a raw ticker symbol (e.g. AAPL, BRK-B). Cache-first to TICKERS_DIR.
+
+    Args:
+        ticker: Yahoo Finance ticker symbol.
+        force_refresh: If True, re-download from scratch.
+        start_date: Start date for historical data.
+        quiet: If True, only print on error (for batch use).
+        update_stale: If True, when cache exists but last date < yesterday, try to fetch
+            missing days (one network call per ticker). If False (default), use cache as-is
+            when it covers requested range (no network on rerun).
+
+    Returns:
+        Tuple of (DataFrame with OHLCV or None if download failed, used_cache: bool).
+    """
+    TICKERS_DIR.mkdir(parents=True, exist_ok=True)
+    csv_file = TICKERS_DIR / f"{ticker}.csv"
+    requested_start = pd.Timestamp(start_date)
+    now = pd.Timestamp.now()
+    yesterday = now - pd.Timedelta(days=1)
+
+    if csv_file.exists() and not force_refresh:
+        try:
+            df_cached = pd.read_csv(csv_file, index_col=0, parse_dates=True)
+            if df_cached.empty:
+                if not quiet:
+                    print(f"  {ticker}: cached empty, re-downloading...")
+            else:
+                # When update_stale=False: use cache as-is (no network), regardless of date range
+                if not update_stale:
+                    return (df_cached, True)
+                cached_start = df_cached.index.min()
+                cached_end = df_cached.index.max()
+                covers_start = cached_start <= requested_start
+                is_fresh = cached_end >= yesterday
+                if covers_start and is_fresh:
+                    return (df_cached, True)
+                if not is_fresh:
+                    # Stale: try incremental update (one network call)
+                    update_start = cached_end + pd.Timedelta(days=1)
+                    try:
+                        df_new = yf.download(ticker, start=update_start.strftime("%Y-%m-%d"), progress=False)
+                        if not df_new.empty:
+                            if isinstance(df_new.columns, pd.MultiIndex):
+                                df_new.columns = df_new.columns.get_level_values(0)
+                            df = pd.concat([df_cached, df_new]).sort_index()
+                            df = df[~df.index.duplicated(keep="last")]
+                            df.to_csv(csv_file)
+                            return (df, False)
+                    except Exception:
+                        pass
+                    return (df_cached, True)
+                if not covers_start and not quiet:
+                    print(f"  {ticker}: cache start > requested, re-downloading...")
+        except Exception as e:
+            if not quiet:
+                print(f"  {ticker}: cache error {e}, re-downloading...")
+
+    def _do_download():
+        out = yf.download(ticker, start=start_date, progress=False)
+        if out.empty:
+            return None
+        if isinstance(out.columns, pd.MultiIndex):
+            out.columns = out.columns.get_level_values(0)
+        out.to_csv(csv_file)
+        return out
+
+    df = None
+    try:
+        df = _do_download()
+    except Exception as e:
+        # Retry once on timeout/connection errors (e.g. curl 28)
+        err_str = str(e).lower()
+        if "timeout" in err_str or "connection" in err_str or "28" in err_str:
+            import time
+            time.sleep(2)
+            try:
+                df = _do_download()
+            except Exception:
+                if not quiet:
+                    print(f"  {ticker}: download error (retry failed): {e}")
+                return (None, False)
+        else:
+            if not quiet:
+                print(f"  {ticker}: download error {e}")
+            return (None, False)
+
+    if df is None or df.empty:
+        if not quiet:
+            print(f"  {ticker}: no data")
+        return (None, False)
+    return (df, False)
 
 
 def download_all(force_refresh: bool = False, start_date: str = "1990-01-01") -> Dict[str, pd.DataFrame]:

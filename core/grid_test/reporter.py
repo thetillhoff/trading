@@ -18,6 +18,9 @@ from ..evaluation.portfolio import PositionStatus
 # Daily rate for 2% p.a. compound: (1.02)^(1/365.25) - 1 so that interest compounds to 2% per year
 CASH_DAILY_RATE_2PA = (1.02 ** (1 / 365.25)) - 1
 
+# When there are more instruments than this, legend shows only best-performing N + strategy (lines still plotted)
+MAX_LEGEND_INSTRUMENTS = 10
+
 
 @dataclass
 class AlphaOverTimeSeries:
@@ -1061,7 +1064,21 @@ class ComparisonReporter:
         ax1.set_xlabel('Date', fontsize=10)
         ax1.set_ylabel('Return (%)', fontsize=10)
         ax1.set_title('Cumulative Returns: Cash vs Buy-and-Hold vs Strategy', fontsize=12, fontweight='bold')
-        ax1.legend(fontsize=9, loc='best')
+        if len(bh_series_by_inst) > MAX_LEGEND_INSTRUMENTS:
+            handles, labels = ax1.get_legend_handles_labels()
+            # Order: cash, B&H per inst (same as bh_series_by_inst), strategy
+            inst_list = list(bh_series_by_inst.keys())
+            best_10 = sorted(
+                inst_list,
+                key=lambda inst: float(bh_series_by_inst[inst].iloc[-1]) if len(bh_series_by_inst[inst]) else float('-inf'),
+                reverse=True,
+            )[:MAX_LEGEND_INSTRUMENTS]
+            inst_to_idx = {inst: 1 + i for i, inst in enumerate(inst_list)}
+            sel_handles = [handles[0]] + [handles[inst_to_idx[inst]] for inst in best_10] + [handles[-1]]
+            sel_labels = [labels[0]] + [labels[inst_to_idx[inst]] for inst in best_10] + [labels[-1]]
+            ax1.legend(sel_handles, sel_labels, fontsize=9, loc='best')
+        else:
+            ax1.legend(fontsize=9, loc='best')
         ax1.grid(True, alpha=0.3)
 
         # Plot 2: Market exposure (% of portfolio invested)
@@ -1181,6 +1198,7 @@ class ComparisonReporter:
         fig, axes = plt.subplots(n_rows, 1, figsize=(14, 6 * n_rows), sharex=True)
         axes = np.atleast_1d(axes)
         ax_top = axes[0]
+        final_cum_by_inst: Dict[str, float] = {}
         for i, inst in enumerate(instruments):
             cum = 0.0
             cum_series = []
@@ -1191,13 +1209,22 @@ class ComparisonReporter:
                     cum += trades[idx][1]
                     idx += 1
                 cum_series.append(cum)
+            final_cum_by_inst[inst] = cum
             ax_top.plot(
                 portfolio_dates, cum_series, label=inst, linewidth=2, alpha=0.8, color=colors[i % len(colors)]
             )
         ax_top.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
         ax_top.set_ylabel('Cumulative value-gain % from trades')
         ax_top.set_title(f'Value-gain % from trades per instrument: {result.config.name}')
-        ax_top.legend(loc='best', fontsize=9)
+        if len(instruments) > MAX_LEGEND_INSTRUMENTS:
+            handles, labels = ax_top.get_legend_handles_labels()
+            best_10 = sorted(instruments, key=lambda inst: final_cum_by_inst.get(inst, float('-inf')), reverse=True)[:MAX_LEGEND_INSTRUMENTS]
+            label_to_handle = dict(zip(labels, handles))
+            sel_handles = [label_to_handle[inst] for inst in best_10]
+            sel_labels = best_10
+            ax_top.legend(sel_handles, sel_labels, fontsize=9, loc='best')
+        else:
+            ax_top.legend(loc='best', fontsize=9)
         ax_top.grid(True, alpha=0.3)
 
         if has_market:
@@ -1210,6 +1237,7 @@ class ComparisonReporter:
                 ax_bottom.set_visible(False)
             else:
                 all_dates = all_dates.sort_values()
+                final_bh_by_inst: Dict[str, float] = {}
                 for i, inst in enumerate(instruments):
                     ser = price_data_by_instrument.get(inst)
                     if ser is None or len(ser) == 0:
@@ -1221,6 +1249,7 @@ class ComparisonReporter:
                     if base <= 0:
                         continue
                     return_pct = (reindexed / base - 1) * 100
+                    final_bh_by_inst[inst] = float(return_pct.iloc[-1])
                     ax_bottom.plot(
                         all_dates, return_pct.values, label=inst, linewidth=2, alpha=0.8, color=colors[i % len(colors)]
                     )
@@ -1228,7 +1257,15 @@ class ComparisonReporter:
                 ax_bottom.set_xlabel('Date')
                 ax_bottom.set_ylabel('Buy-and-hold return (%)')
                 ax_bottom.set_title('Market (buy-and-hold) return % per instrument')
-                ax_bottom.legend(loc='best', fontsize=9)
+                if len(final_bh_by_inst) > MAX_LEGEND_INSTRUMENTS:
+                    handles, labels = ax_bottom.get_legend_handles_labels()
+                    best_10 = sorted(final_bh_by_inst.keys(), key=lambda inst: final_bh_by_inst.get(inst, float('-inf')), reverse=True)[:MAX_LEGEND_INSTRUMENTS]
+                    label_to_handle = dict(zip(labels, handles))
+                    sel_handles = [label_to_handle[inst] for inst in best_10]
+                    sel_labels = best_10
+                    ax_bottom.legend(sel_handles, sel_labels, fontsize=9, loc='best')
+                else:
+                    ax_bottom.legend(loc='best', fontsize=9)
                 ax_bottom.grid(True, alpha=0.3)
         else:
             axes[0].set_xlabel('Date')

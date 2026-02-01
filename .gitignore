@@ -28,6 +28,10 @@ Thumbs.db
 # Data files
 *.csv
 !requirements.txt
+data/instrument_metadata.json
+data/available_assets_metadata.json
+data/available_assets_*.csv
+data/tickers/
 
 # Generated images
 *.png
