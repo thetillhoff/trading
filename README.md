@@ -1,3 +1,6 @@
+pluggable/extensible rules, signals, indicators, instruments, etc.
+
+
 # Trading Analysis Project
 
 A comprehensive Python project for analyzing market data using Elliott Wave Theory,
@@ -20,6 +23,10 @@ See all available commands:
 
 ```bash
 make help
+
+# One-time: download baseline data (S&P 500), then run evaluation
+make download-baseline
+make evaluate
 
 # Download top 100 instrument candidates from ~500 available
 make asset-analysis ARGS='--all-assets --fetch-metadata --analyze --top 100'

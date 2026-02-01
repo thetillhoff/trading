@@ -4,7 +4,9 @@ Technical indicators for trading signal confirmation.
 Provides RSI, EMA, MACD, and other indicators that can be used
 to confirm or filter trading signals.
 """
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
@@ -162,88 +164,159 @@ class TechnicalIndicators:
     def calculate_adx(self, data: pd.DataFrame, period: int = 14) -> pd.Series:
         """
         Calculate ADX (Average Directional Index) for trend strength detection.
-        
+
         ADX measures trend strength (0-100):
         - ADX > 30: Strong trend
         - ADX 20-30: Moderate trend
         - ADX < 20: Weak/no trend
-        
+
+        Uses a single rolling pass for TR and +/-DM smoothing, then one for DX→ADX.
+
         Args:
             data: DataFrame with 'High', 'Low', 'Close' columns OR Series with Close prices
             period: Period for ADX calculation (default: 14)
-        
+
         Returns:
             Series with ADX values
         """
-        # Handle both DataFrame (preferred) and Series (fallback) input
-        if isinstance(data, pd.DataFrame) and 'High' in data.columns and 'Low' in data.columns and 'Close' in data.columns:
-            # Use proper High/Low/Close for accurate ADX
+        idx = data.index if isinstance(data, pd.DataFrame) else data.index
+        # Build TR and +/-DM (vectorized)
+        if isinstance(data, pd.DataFrame) and all(c in data.columns for c in ('High', 'Low', 'Close')):
             high = data['High']
             low = data['Low']
             close = data['Close']
-            
-            # True Range
             prev_close = close.shift(1)
-            tr1 = high - low
-            tr2 = abs(high - prev_close)
-            tr3 = abs(low - prev_close)
-            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            
-            # Directional Movement
-            up_move = high - high.shift(1)
+            tr = pd.concat([
+                high - low,
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            up_move = high.diff()
             down_move = low.shift(1) - low
-            
-            plus_dm = pd.Series(0.0, index=data.index)
-            minus_dm = pd.Series(0.0, index=data.index)
-            
-            plus_dm[(up_move > down_move) & (up_move > 0)] = up_move[(up_move > down_move) & (up_move > 0)]
-            minus_dm[(down_move > up_move) & (down_move > 0)] = down_move[(down_move > up_move) & (down_move > 0)]
+            plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move.values, 0.0), index=idx)
+            minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move.values, 0.0), index=idx)
         else:
-            # Fallback: use Close prices only (less accurate)
-            if isinstance(data, pd.Series):
-                prices = data
-            else:
-                prices = data['Close'] if 'Close' in data.columns else data.iloc[:, 0]
-            
-            high = prices
-            low = prices
-            
+            prices = data['Close'] if isinstance(data, pd.DataFrame) else data
+            high, low = prices, prices
             tr = high.rolling(2).max() - low.rolling(2).min()
             tr = tr.fillna(0)
-            
             up_move = high.diff()
             down_move = -low.diff()
-            
-            plus_dm = pd.Series(0.0, index=prices.index)
-            minus_dm = pd.Series(0.0, index=prices.index)
-            
-            plus_dm[up_move > down_move] = up_move[up_move > down_move].clip(lower=0)
-            minus_dm[down_move > up_move] = down_move[down_move > up_move].clip(lower=0)
-        
-        # Smoothed averages using Wilder's smoothing
-        atr = tr.rolling(period).mean()
-        plus_di = 100 * (plus_dm.rolling(period).mean() / atr.replace(0, np.nan))
-        minus_di = 100 * (minus_dm.rolling(period).mean() / atr.replace(0, np.nan))
-        
-        # Directional Index (DX)
-        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan)
-        
-        # ADX (smoothed DX)
+            plus_dm = pd.Series(np.where(up_move > down_move, np.clip(up_move.values, 0, None), 0.0), index=idx)
+            minus_dm = pd.Series(np.where(down_move > up_move, np.clip(down_move.values, 0, None), 0.0), index=idx)
+        # Single rolling pass for TR and +/-DM (Wilder smoothing = SMA here)
+        smoothed = pd.DataFrame({'tr': tr, 'plus_dm': plus_dm, 'minus_dm': minus_dm}, index=idx).rolling(period).mean()
+        atr = smoothed['tr']
+        atr_safe = atr.replace(0, np.nan)
+        plus_di = 100 * (smoothed['plus_dm'] / atr_safe)
+        minus_di = 100 * (smoothed['minus_dm'] / atr_safe)
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
         adx = dx.rolling(period).mean()
-        
         return adx.fillna(0)
-    
+
+    def _compute_rsi_block(self, prices: pd.Series) -> Tuple[str, Dict[str, pd.Series], float]:
+        """Compute RSI block; returns (timing_key, {col: series}, elapsed)."""
+        t0 = time.perf_counter()
+        rsi = self.calculate_rsi(prices)
+        cols = {
+            "rsi": rsi,
+            "rsi_oversold": rsi < self.rsi_oversold,
+            "rsi_overbought": rsi > self.rsi_overbought,
+        }
+        return "indicator_rsi", cols, time.perf_counter() - t0
+
+    def _compute_ema_block(self, prices: pd.Series) -> Tuple[str, Dict[str, pd.Series], float]:
+        """Compute EMA block; returns (timing_key, {col: series}, elapsed)."""
+        t0 = time.perf_counter()
+        ema_short = self.calculate_ema(prices, self.ema_short_period)
+        ema_long = self.calculate_ema(prices, self.ema_long_period)
+        ema_diff = ema_short - ema_long
+        ema_diff_prev = ema_diff.shift(1)
+        cols = {
+            "ema_short": ema_short,
+            "ema_long": ema_long,
+            "price_above_ema_short": prices > ema_short,
+            "price_above_ema_long": prices > ema_long,
+            "ema_bullish_cross": (ema_diff > 0) & (ema_diff_prev <= 0),
+            "ema_bearish_cross": (ema_diff < 0) & (ema_diff_prev >= 0),
+        }
+        return "indicator_ema", cols, time.perf_counter() - t0
+
+    def _compute_macd_block(self, prices: pd.Series) -> Tuple[str, Dict[str, pd.Series], float]:
+        """Compute MACD block; returns (timing_key, {col: series}, elapsed)."""
+        t0 = time.perf_counter()
+        macd_line, signal_line, histogram = self.calculate_macd(prices)
+        histogram_prev = histogram.shift(1)
+        cols = {
+            "macd_line": macd_line,
+            "macd_signal": signal_line,
+            "macd_histogram": histogram,
+            "macd_bullish": (histogram > 0)
+            | ((histogram > histogram_prev) & (histogram_prev < 0)),
+            "macd_bearish": (histogram < 0)
+            | ((histogram < histogram_prev) & (histogram_prev > 0)),
+        }
+        return "indicator_macd", cols, time.perf_counter() - t0
+
+    def _compute_adx_block(
+        self, data: Union[pd.Series, pd.DataFrame]
+    ) -> Tuple[str, Dict[str, pd.Series], float]:
+        """Compute ADX + MA block; returns (timing_key, {col: series}, elapsed)."""
+        t0 = time.perf_counter()
+        prices = (
+            data["Close"]
+            if isinstance(data, pd.DataFrame) and "Close" in data.columns
+            else (data.iloc[:, 0] if isinstance(data, pd.DataFrame) else data)
+        )
+        adx = self.calculate_adx(data)
+        ma_50 = prices.rolling(50).mean()
+        cols = {
+            "adx": adx,
+            "ma_50": ma_50,
+            "ma_slope": ma_50.diff(5),
+        }
+        return "indicator_adx_ma", cols, time.perf_counter() - t0
+
+    def _compute_volatility_block(
+        self, prices: pd.Series
+    ) -> Tuple[str, Dict[str, pd.Series], float]:
+        """Compute return + volatility block; returns (timing_key, {col: series}, elapsed)."""
+        t0 = time.perf_counter()
+        return_pct = prices.pct_change()
+        cols = {
+            "return_pct": return_pct,
+            "volatility_20": return_pct.rolling(self.volatility_window).std(),
+        }
+        return "indicator_volatility", cols, time.perf_counter() - t0
+
+    def _compute_atr_block(
+        self, data: Union[pd.Series, pd.DataFrame], prices: pd.Series
+    ) -> Tuple[str, Dict[str, pd.Series], float]:
+        """Compute ATR block; returns (timing_key, {col: series}, elapsed)."""
+        t0 = time.perf_counter()
+        atr = self.calculate_atr(data)
+        cols = {
+            "atr": atr,
+            "atr_pct": (atr / prices).replace(0, np.nan),
+        }
+        return "indicator_atr", cols, time.perf_counter() - t0
+
     def calculate_all(
         self,
         data: Union[pd.Series, pd.DataFrame],
         timings: Optional[Dict[str, float]] = None,
+        max_workers: Optional[int] = None,
     ) -> pd.DataFrame:
         """
         Calculate all indicators and return as DataFrame.
 
+        RSI, EMA, MACD, ADX, volatility, and ATR are computed in parallel via
+        ThreadPoolExecutor when max_workers > 1.
+
         Args:
             data: Price series or DataFrame with OHLCV columns
             timings: If provided, accumulate per-indicator elapsed seconds (keys: indicator_rsi, etc.)
+            max_workers: Thread pool size (default: cpu_count); 1 = sequential.
 
         Returns:
             DataFrame with all indicator values
@@ -256,61 +329,46 @@ class TechnicalIndicators:
         if isinstance(data, pd.Series):
             prices = data
             df = pd.DataFrame(index=prices.index)
-            df['price'] = prices
+            df["price"] = prices
         else:
-            # DataFrame with OHLCV columns
-            prices = data['Close'] if 'Close' in data.columns else data.iloc[:, 0]
+            prices = data["Close"] if "Close" in data.columns else data.iloc[:, 0]
             df = pd.DataFrame(index=data.index)
-            df['price'] = prices
+            df["price"] = prices
 
-        # RSI
-        t0 = time.perf_counter()
-        df['rsi'] = self.calculate_rsi(prices)
-        df['rsi_oversold'] = df['rsi'] < self.rsi_oversold
-        df['rsi_overbought'] = df['rsi'] > self.rsi_overbought
-        _acc('indicator_rsi', time.perf_counter() - t0)
+        workers = (
+            max(1, max_workers)
+            if max_workers is not None
+            else (os.cpu_count() or 1)
+        )
 
-        # EMAs
-        t0 = time.perf_counter()
-        df['ema_short'] = self.calculate_ema(prices, self.ema_short_period)
-        df['ema_long'] = self.calculate_ema(prices, self.ema_long_period)
-        df['price_above_ema_short'] = prices > df['ema_short']
-        df['price_above_ema_long'] = prices > df['ema_long']
-        ema_diff = df['ema_short'] - df['ema_long']
-        ema_diff_prev = ema_diff.shift(1)
-        df['ema_bullish_cross'] = (ema_diff > 0) & (ema_diff_prev <= 0)
-        df['ema_bearish_cross'] = (ema_diff < 0) & (ema_diff_prev >= 0)
-        _acc('indicator_ema', time.perf_counter() - t0)
-
-        # MACD
-        t0 = time.perf_counter()
-        macd_line, signal_line, histogram = self.calculate_macd(prices)
-        df['macd_line'] = macd_line
-        df['macd_signal'] = signal_line
-        df['macd_histogram'] = histogram
-        histogram_prev = histogram.shift(1)
-        df['macd_bullish'] = (histogram > 0) | ((histogram > histogram_prev) & (histogram_prev < 0))
-        df['macd_bearish'] = (histogram < 0) | ((histogram < histogram_prev) & (histogram_prev > 0))
-        _acc('indicator_macd', time.perf_counter() - t0)
-
-        # ADX
-        t0 = time.perf_counter()
-        df['adx'] = self.calculate_adx(data)
-        df['ma_50'] = prices.rolling(50).mean()
-        df['ma_slope'] = df['ma_50'].diff(5)
-        _acc('indicator_adx_ma', time.perf_counter() - t0)
-
-        # Returns + volatility
-        t0 = time.perf_counter()
-        df['return_pct'] = prices.pct_change()
-        df['volatility_20'] = df['return_pct'].rolling(self.volatility_window).std()
-        _acc('indicator_volatility', time.perf_counter() - t0)
-
-        # ATR
-        t0 = time.perf_counter()
-        df['atr'] = self.calculate_atr(data)
-        df['atr_pct'] = (df['atr'] / prices).replace(0, np.nan)
-        _acc('indicator_atr', time.perf_counter() - t0)
+        if workers <= 1:
+            # Sequential (e.g. testing or single-threaded)
+            for key, cols, elapsed in [
+                self._compute_rsi_block(prices),
+                self._compute_ema_block(prices),
+                self._compute_macd_block(prices),
+                self._compute_adx_block(data),
+                self._compute_volatility_block(prices),
+                self._compute_atr_block(data, prices),
+            ]:
+                _acc(key, elapsed)
+                for k, v in cols.items():
+                    df[k] = v
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [
+                    executor.submit(self._compute_rsi_block, prices),
+                    executor.submit(self._compute_ema_block, prices),
+                    executor.submit(self._compute_macd_block, prices),
+                    executor.submit(self._compute_adx_block, data),
+                    executor.submit(self._compute_volatility_block, prices),
+                    executor.submit(self._compute_atr_block, data, prices),
+                ]
+                for future in as_completed(futures):
+                    key, cols, elapsed = future.result()
+                    _acc(key, elapsed)
+                    for k, v in cols.items():
+                        df[k] = v
 
         return df
     
@@ -412,27 +470,34 @@ def confirmation_weighted_score(
     use_macd: bool,
     weights: Optional[Dict[str, float]] = None,
     for_buy: bool = True,
+    mtf_confirms: Optional[bool] = None,
 ) -> Optional[float]:
     """
     Weighted confirmation score in [0, 1]. Returns None if weights not provided or no data.
+    When weights has "mtf" and mtf_confirms is not None, MTF is included as a fourth indicator.
     """
-    if indicators is None or not weights:
+    if not weights:
         return None
-    flags = _confirmation_flags_buy(indicators) if for_buy else _confirmation_flags_sell(indicators)
-    w_rsi = weights.get("rsi", 1.0)
-    w_ema = weights.get("ema", 1.0)
-    w_macd = weights.get("macd", 1.0)
     total_weight = 0.0
     score = 0.0
-    if use_rsi and flags[0] is not None:
-        total_weight += w_rsi
-        score += w_rsi * (1.0 if flags[0] else 0.0)
-    if use_ema and flags[1] is not None:
-        total_weight += w_ema
-        score += w_ema * (1.0 if flags[1] else 0.0)
-    if use_macd and flags[2] is not None:
-        total_weight += w_macd
-        score += w_macd * (1.0 if flags[2] else 0.0)
+    if indicators is not None:
+        flags = _confirmation_flags_buy(indicators) if for_buy else _confirmation_flags_sell(indicators)
+        w_rsi = weights.get("rsi", 1.0)
+        w_ema = weights.get("ema", 1.0)
+        w_macd = weights.get("macd", 1.0)
+        if use_rsi and flags[0] is not None:
+            total_weight += w_rsi
+            score += w_rsi * (1.0 if flags[0] else 0.0)
+        if use_ema and flags[1] is not None:
+            total_weight += w_ema
+            score += w_ema * (1.0 if flags[1] else 0.0)
+        if use_macd and flags[2] is not None:
+            total_weight += w_macd
+            score += w_macd * (1.0 if flags[2] else 0.0)
+    w_mtf = weights.get("mtf")
+    if w_mtf is not None and mtf_confirms is not None:
+        total_weight += w_mtf
+        score += w_mtf * (1.0 if mtf_confirms else 0.0)
     if total_weight <= 0:
         return None
     return score / total_weight

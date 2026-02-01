@@ -10,6 +10,11 @@ from typing import Dict, List, Optional, Tuple
 
 from ..shared.types import SignalType, TradingSignal
 from ..shared.defaults import INDICATOR_WARMUP_PERIOD, ADX_REGIME_THRESHOLD
+from .detector_filters import (
+    filter_signals_by_type,
+    filter_signals_by_quality,
+    deduplicate_signals,
+)
 from ..indicators.technical import (
     TechnicalIndicators,
     IndicatorValues,
@@ -18,6 +23,7 @@ from ..indicators.technical import (
     confirmation_weighted_score,
 )
 from ..indicators.elliott_wave import ElliottWaveDetector, Wave, WaveType, WaveLabel
+from .rules import get_technical_rules, apply_trend_filter
 
 # Alias for backward compatibility
 Signal = TradingSignal
@@ -99,16 +105,17 @@ class SignalDetector:
             inverted_ew_signals, _ = self._get_inverted_elliott_wave_signals(data, indicator_df)
             signals.extend(inverted_ew_signals)
 
+        # Multi-timeframe filter: keep only signals confirmed by weekly trend (close vs weekly EMA)
+        if getattr(self.config, "use_multi_timeframe", False):
+            signals = self._filter_signals_by_multi_timeframe(signals, data)
+
         # Filter by signal type
-        signal_types = getattr(self.config, 'signal_types', 'all')
-        if signal_types == "buy":
-            signals = [s for s in signals if s.signal_type == SignalType.BUY]
-        elif signal_types == "sell":
-            signals = [s for s in signals if s.signal_type == SignalType.SELL]
+        signal_types = getattr(self.config, "signal_types", "all")
+        signals = filter_signals_by_type(signals, signal_types)
 
         # Sort by timestamp and remove duplicates
         signals = sorted(signals, key=lambda s: s.timestamp)
-        signals = self._deduplicate_signals(signals)
+        signals = deduplicate_signals(signals)
 
         return signals
 
@@ -159,21 +166,105 @@ class SignalDetector:
             signals.extend(inverted_ew_signals)
             all_waves.extend(inv_waves)
 
+        # Set MTF confirmation per signal (for filter and/or weighted indicator)
+        if getattr(self.config, "use_multi_timeframe", False):
+            for s in signals:
+                s.mtf_confirms = self._mtf_confirms_single(s, data)
+        # Multi-timeframe filter: drop signals not confirmed by weekly trend (when filter mode)
+        if getattr(self.config, "use_multi_timeframe", False):
+            signals = self._filter_signals_by_multi_timeframe(signals, data)
+        # MTF as weighted indicator: include in confirmation_score when indicator_weights has "mtf"
+        weights = getattr(self.config, "indicator_weights", None)
+        if (
+            getattr(self.config, "use_multi_timeframe", False)
+            and weights
+            and "mtf" in weights
+            and indicator_df is not None
+        ):
+            for s in signals:
+                _, _, _, indicators = self._check_indicator_confirmation(s, indicator_df)
+                score = confirmation_weighted_score(
+                    indicators,
+                    use_rsi=getattr(self.config, "use_rsi", False),
+                    use_ema=getattr(self.config, "use_ema", False),
+                    use_macd=getattr(self.config, "use_macd", False),
+                    weights=weights,
+                    for_buy=(s.signal_type == SignalType.BUY),
+                    mtf_confirms=s.mtf_confirms,
+                )
+                if score is not None:
+                    s.confirmation_score = score
+
         # Filter by signal type
-        signal_types = getattr(self.config, 'signal_types', 'all')
-        if signal_types == "buy":
-            signals = [s for s in signals if s.signal_type == SignalType.BUY]
-        elif signal_types == "sell":
-            signals = [s for s in signals if s.signal_type == SignalType.SELL]
+        signal_types = getattr(self.config, "signal_types", "all")
+        signals = filter_signals_by_type(signals, signal_types)
 
         # Filter by min confirmations and min certainty (signal quality)
-        signals = self._filter_signals_by_quality(signals)
+        signals = filter_signals_by_quality(signals, self.config)
 
         # Sort by timestamp and remove duplicates
         signals = sorted(signals, key=lambda s: s.timestamp)
-        signals = self._deduplicate_signals(signals)
+        signals = deduplicate_signals(signals)
 
         return signals, indicator_df, all_waves
+
+    def _mtf_confirms_single(self, signal: Signal, data: pd.Series) -> Optional[bool]:
+        """
+        Return whether weekly trend confirms this signal (BUY: weekly close >= weekly EMA,
+        SELL: weekly close <= weekly EMA). Returns None if data insufficient or not applicable.
+        """
+        period = max(1, getattr(self.config, "multi_timeframe_weekly_ema_period", 8))
+        weekly = data.resample("W").last()
+        if len(weekly) < period:
+            return None
+        weekly_ema = weekly.ewm(span=period, min_periods=period).mean()
+        week_end = signal.timestamp.to_period("W").end_time
+        idx = weekly.index.get_indexer([week_end], method="ffill")[0]
+        if idx < 0:
+            return None
+        w_close = weekly.iloc[idx]
+        w_ema = weekly_ema.iloc[idx]
+        if pd.isna(w_close) or pd.isna(w_ema):
+            return None
+        if signal.signal_type == SignalType.BUY:
+            return bool(w_close >= w_ema)
+        if signal.signal_type == SignalType.SELL:
+            return bool(w_close <= w_ema)
+        return None
+
+    def _filter_signals_by_multi_timeframe(
+        self, signals: List[Signal], data: pd.Series
+    ) -> List[Signal]:
+        """
+        Keep only signals confirmed by weekly trend when use_multi_timeframe_filter is True.
+        No-op when use_multi_timeframe is False or use_multi_timeframe_filter is False.
+        """
+        if not signals:
+            return signals
+        if not getattr(self.config, "use_multi_timeframe", False):
+            return signals
+        if not getattr(self.config, "use_multi_timeframe_filter", True):
+            return signals
+        period = max(1, getattr(self.config, "multi_timeframe_weekly_ema_period", 8))
+        weekly = data.resample("W").last()
+        if len(weekly) < period:
+            return signals
+        weekly_ema = weekly.ewm(span=period, min_periods=period).mean()
+        filtered = []
+        for s in signals:
+            week_end = s.timestamp.to_period("W").end_time
+            idx = weekly.index.get_indexer([week_end], method="ffill")[0]
+            if idx < 0:
+                continue
+            w_close = weekly.iloc[idx]
+            w_ema = weekly_ema.iloc[idx]
+            if pd.isna(w_close) or pd.isna(w_ema):
+                continue
+            if s.signal_type == SignalType.BUY and w_close >= w_ema:
+                filtered.append(s)
+            elif s.signal_type == SignalType.SELL and w_close <= w_ema:
+                filtered.append(s)
+        return filtered
 
     def _invert_price_data(self, data: pd.Series) -> pd.Series:
         """
@@ -204,71 +295,52 @@ class SignalDetector:
         data: pd.Series,
         indicator_df: pd.DataFrame,
     ) -> List[Signal]:
-        """Generate signals from technical indicators (RSI, EMA, MACD)."""
-        signals = []
-        
+        """Generate signals from technical indicators via pluggable rules (RSI, EMA, MACD)."""
+        signals: List[Signal] = []
         if indicator_df is None or len(indicator_df) < INDICATOR_WARMUP_PERIOD:
             return signals
-        
+
+        rules = get_technical_rules(self.config)
+        if not rules:
+            return signals
+
         start_idx = INDICATOR_WARMUP_PERIOD
-        
+        use_trend_filter = getattr(self.config, "use_trend_filter", False)
+
         for i in range(start_idx, len(indicator_df)):
             row = indicator_df.iloc[i]
             prev_row = indicator_df.iloc[i - 1]
             timestamp = indicator_df.index[i]
-            price = row['price']
-            
-            # Skip if indicators not calculated
-            if pd.isna(row.get('rsi')) or pd.isna(row.get('macd_histogram')):
+            price = row["price"]
+
+            if pd.isna(row.get("rsi")) or pd.isna(row.get("macd_histogram")):
                 continue
-            
-            buy_reasons = []
-            sell_reasons = []
-            
-            # RSI signals
-            if getattr(self.config, 'use_rsi', False):
-                if prev_row['rsi_oversold'] and not row['rsi_oversold']:
-                    buy_reasons.append(f"RSI exit oversold ({row['rsi']:.0f})")
-                if not prev_row['rsi_overbought'] and row['rsi_overbought']:
-                    sell_reasons.append(f"RSI enter overbought ({row['rsi']:.0f})")
-            
-            # EMA signals
-            if getattr(self.config, 'use_ema', False):
-                if row['ema_bullish_cross']:
-                    buy_reasons.append("EMA bullish cross")
-                if row['ema_bearish_cross']:
-                    sell_reasons.append("EMA bearish cross")
-            
-            # MACD signals
-            if getattr(self.config, 'use_macd', False):
-                if prev_row['macd_histogram'] < 0 and row['macd_histogram'] >= 0:
-                    buy_reasons.append("MACD cross above zero")
-                if prev_row['macd_histogram'] > 0 and row['macd_histogram'] <= 0:
-                    sell_reasons.append("MACD cross below zero")
-            
-            # Apply trend filter if enabled
-            use_trend_filter = getattr(self.config, 'use_trend_filter', False)
-            ema_short = row.get('ema_short')
-            ema_long = row.get('ema_long')
-            
-            # Determine trend direction
-            is_bullish_trend = ema_short > ema_long if (ema_short is not None and ema_long is not None) else None
-            
-            # Generate signals
+
+            buy_reasons: List[str] = []
+            sell_reasons: List[str] = []
+            for rule in rules:
+                b, s = rule.evaluate(row, prev_row, self.config)
+                buy_reasons.extend(b)
+                sell_reasons.extend(s)
+
+            buy_reasons, sell_reasons = apply_trend_filter(
+                buy_reasons, sell_reasons, row, self.config
+            )
+            ema_short = row.get("ema_short")
+            ema_long = row.get("ema_long")
+            is_bullish_trend = (
+                ema_short > ema_long
+                if (ema_short is not None and ema_long is not None)
+                else None
+            )
+
             if buy_reasons:
-                # Apply trend filter: only generate BUY signals in bullish trend
-                if use_trend_filter and is_bullish_trend is not None:
-                    if not is_bullish_trend:
-                        # Skip this BUY signal - trend is bearish
-                        buy_reasons = []
-                
-                if buy_reasons:  # Re-check after filtering
-                    confidence = 0.5 + (len(buy_reasons) * 0.15)
-                    reasoning = " | ".join(buy_reasons)
-                    if use_trend_filter and is_bullish_trend:
-                        reasoning += " | Trend: Bullish"
-                    
-                    signals.append(Signal(
+                confidence = 0.5 + (len(buy_reasons) * 0.15)
+                reasoning = " | ".join(buy_reasons)
+                if use_trend_filter and is_bullish_trend:
+                    reasoning += " | Trend: Bullish"
+                signals.append(
+                    Signal(
                         signal_type=SignalType.BUY,
                         timestamp=timestamp,
                         price=price,
@@ -276,29 +348,22 @@ class SignalDetector:
                         source="indicator",
                         reasoning=reasoning,
                         indicator_confirmations=len(buy_reasons),
-                        rsi_value=row.get('rsi'),
+                        rsi_value=row.get("rsi"),
                         ema_short=ema_short,
                         ema_long=ema_long,
-                        macd_value=row.get('macd'),
-                        macd_signal=row.get('macd_signal'),
-                        macd_histogram=row.get('macd_histogram'),
+                        macd_value=row.get("macd"),
+                        macd_signal=row.get("macd_signal"),
+                        macd_histogram=row.get("macd_histogram"),
                         trend_filter_active=use_trend_filter,
-                    ))
-
+                    )
+                )
             if sell_reasons:
-                # Apply trend filter: only generate SELL signals in bearish trend
-                if use_trend_filter and is_bullish_trend is not None:
-                    if is_bullish_trend:
-                        # Skip this SELL signal - trend is bullish
-                        sell_reasons = []
-                
-                if sell_reasons:  # Re-check after filtering
-                    confidence = 0.5 + (len(sell_reasons) * 0.15)
-                    reasoning = " | ".join(sell_reasons)
-                    if use_trend_filter and not is_bullish_trend:
-                        reasoning += " | Trend: Bearish"
-                    
-                    signals.append(Signal(
+                confidence = 0.5 + (len(sell_reasons) * 0.15)
+                reasoning = " | ".join(sell_reasons)
+                if use_trend_filter and is_bullish_trend is False:
+                    reasoning += " | Trend: Bearish"
+                signals.append(
+                    Signal(
                         signal_type=SignalType.SELL,
                         timestamp=timestamp,
                         price=price,
@@ -306,15 +371,16 @@ class SignalDetector:
                         source="indicator",
                         reasoning=reasoning,
                         indicator_confirmations=len(sell_reasons),
-                        rsi_value=row.get('rsi'),
+                        rsi_value=row.get("rsi"),
                         ema_short=ema_short,
                         ema_long=ema_long,
-                        macd_value=row.get('macd'),
-                        macd_signal=row.get('macd_signal'),
-                        macd_histogram=row.get('macd_histogram'),
+                        macd_value=row.get("macd"),
+                        macd_signal=row.get("macd_signal"),
+                        macd_histogram=row.get("macd_histogram"),
                         trend_filter_active=use_trend_filter,
-                    ))
-        
+                    )
+                )
+
         return signals
     
     def _get_elliott_wave_signals(
@@ -769,32 +835,8 @@ class SignalDetector:
 
     def _filter_signals_by_quality(self, signals: List[Signal]) -> List[Signal]:
         """Keep only signals meeting min_confirmations and min_certainty (if set)."""
-        min_confirmations = getattr(self.config, 'min_confirmations', None)
-        min_certainty = getattr(self.config, 'min_certainty', None)
-        if min_confirmations is None and min_certainty is None:
-            return signals
-        filtered = []
-        for s in signals:
-            ok_conf = min_confirmations is None or getattr(s, 'indicator_confirmations', 0) >= min_confirmations
-            effective_certainty = (
-                s.confirmation_score
-                if getattr(s, 'confirmation_score', None) is not None
-                else getattr(s, 'indicator_confirmations', 0) / 3.0
-            )
-            ok_cert = min_certainty is None or effective_certainty >= min_certainty
-            if ok_conf and ok_cert:
-                filtered.append(s)
-        return filtered
-    
+        return filter_signals_by_quality(signals, self.config)
+
     def _deduplicate_signals(self, signals: List[Signal]) -> List[Signal]:
         """Remove duplicate signals on the same day."""
-        seen = set()
-        unique = []
-        
-        for sig in signals:
-            key = (sig.timestamp.date(), sig.signal_type)
-            if key not in seen:
-                seen.add(key)
-                unique.append(sig)
-        
-        return unique
+        return deduplicate_signals(signals)

@@ -183,6 +183,28 @@ class TestCalculateAll:
         assert 'price' in df.columns
         assert 'adx' in df.columns
 
+    def test_calculate_all_parallel_matches_sequential(self, sample_prices):
+        """Parallel (max_workers=6) and sequential (max_workers=1) produce identical output."""
+        indicators = TechnicalIndicators()
+        df_seq = indicators.calculate_all(sample_prices, max_workers=1)
+        df_par = indicators.calculate_all(sample_prices, max_workers=6)
+        pd.testing.assert_frame_equal(
+            df_seq.sort_index(axis=1), df_par.sort_index(axis=1)
+        )
+
+    def test_calculate_all_timings_accumulate(self, sample_prices):
+        """When timings= dict is passed, per-indicator keys are populated (parallel or sequential)."""
+        indicators = TechnicalIndicators()
+        timings = {}
+        indicators.calculate_all(sample_prices, timings=timings, max_workers=6)
+        expected_keys = {
+            "indicator_rsi", "indicator_ema", "indicator_macd",
+            "indicator_adx_ma", "indicator_volatility", "indicator_atr",
+        }
+        assert expected_keys.issubset(timings.keys())
+        for k in expected_keys:
+            assert timings[k] >= 0
+
 
 class TestGetIndicatorsAt:
     """Test get_indicators_at."""

@@ -3,6 +3,7 @@ Strategy configuration for trading signals.
 
 Contains strategy configurations, presets, and grid search generation.
 All indicators (RSI, EMA, MACD, Elliott Wave) are treated equally.
+Config validation runs at construction time (fail fast with clear errors).
 """
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
@@ -22,6 +23,57 @@ from ..shared.defaults import (
     USE_TREND_FILTER,
     STEP_DAYS, LOOKBACK_DAYS, INITIAL_CAPITAL,
 )
+
+
+def _validate_config(
+    *,
+    ema_short_period: int,
+    ema_long_period: int,
+    rsi_oversold: int,
+    rsi_overbought: int,
+    risk_reward: float,
+    position_size_pct: float,
+    min_confidence: Optional[float] = None,
+    min_wave_size: Optional[float] = None,
+    min_certainty: Optional[float] = None,
+    min_confirmations: Optional[int] = None,
+    multi_timeframe_weekly_ema_period: Optional[int] = None,
+) -> None:
+    """Validate indicator and risk parameters. Raises ValueError with clear message on failure."""
+    if multi_timeframe_weekly_ema_period is not None and multi_timeframe_weekly_ema_period < 1:
+        raise ValueError(
+            f"multi_timeframe_weekly_ema_period must be >= 1, got {multi_timeframe_weekly_ema_period}"
+        )
+    if ema_short_period >= ema_long_period:
+        raise ValueError(
+            f"EMA short_period ({ema_short_period}) must be less than long_period ({ema_long_period})"
+        )
+    if rsi_oversold >= rsi_overbought:
+        raise ValueError(
+            f"RSI oversold ({rsi_oversold}) must be less than overbought ({rsi_overbought})"
+        )
+    if risk_reward <= 0:
+        raise ValueError(f"risk_reward must be > 0, got {risk_reward}")
+    if not (0 < position_size_pct <= 1):
+        raise ValueError(
+            f"position_size_pct must be in (0, 1], got {position_size_pct}"
+        )
+    if min_confidence is not None and not (0 <= min_confidence <= 1):
+        raise ValueError(
+            f"min_confidence must be in [0, 1], got {min_confidence}"
+        )
+    if min_wave_size is not None and not (0 <= min_wave_size <= 1):
+        raise ValueError(
+            f"min_wave_size must be in [0, 1], got {min_wave_size}"
+        )
+    if min_certainty is not None and not (0 <= min_certainty <= 1):
+        raise ValueError(
+            f"min_certainty must be in [0, 1], got {min_certainty}"
+        )
+    if min_confirmations is not None and min_confirmations < 0:
+        raise ValueError(
+            f"min_confirmations must be >= 0, got {min_confirmations}"
+        )
 
 
 @dataclass
@@ -59,7 +111,7 @@ class SignalConfig:
     min_certainty: Optional[float] = None  # Require effective certainty >= this 0-1 (None = no filter)
     use_trend_filter: bool = USE_TREND_FILTER  # Only trade in direction of EMA trend
 
-    # Optional per-indicator weights for confirmation (rsi, ema, macd). If None, equal weight.
+    # Optional per-indicator weights for confirmation (rsi, ema, macd; optional mtf when use_multi_timeframe). If None, equal weight.
     indicator_weights: Optional[Dict[str, float]] = None
 
     # Regime detection (must match StrategyConfig when built from it in walk_forward)
@@ -74,6 +126,27 @@ class SignalConfig:
     # Volatility filter for confirmation
     use_volatility_filter: bool = False
     volatility_max: float = 0.02
+
+    # Multi-timeframe: confirm daily signals with weekly trend (weekly close vs weekly EMA)
+    use_multi_timeframe: bool = False
+    multi_timeframe_weekly_ema_period: int = 8  # weeks
+    # When True, drop signals that fail MTF check. When False, MTF only contributes to confirmation_score if indicator_weights has "mtf".
+    use_multi_timeframe_filter: bool = True
+
+    def __post_init__(self) -> None:
+        _validate_config(
+            ema_short_period=self.ema_short_period,
+            ema_long_period=self.ema_long_period,
+            rsi_oversold=self.rsi_oversold,
+            rsi_overbought=self.rsi_overbought,
+            risk_reward=1.0,
+            position_size_pct=0.2,
+            min_confidence=self.min_confidence,
+            min_wave_size=self.min_wave_size,
+            min_certainty=self.min_certainty,
+            min_confirmations=self.min_confirmations,
+            multi_timeframe_weekly_ema_period=self.multi_timeframe_weekly_ema_period,
+        )
 
 
 @dataclass
@@ -118,7 +191,7 @@ class StrategyConfig:
     min_confirmations: Optional[int] = None  # Require at least N indicator confirmations (None = no filter)
     min_certainty: Optional[float] = None  # Require effective certainty >= this 0-1 (None = no filter)
 
-    # Optional per-indicator weights for confirmation (rsi, ema, macd). If None, equal weight.
+    # Optional per-indicator weights for confirmation (rsi, ema, macd; optional mtf when use_multi_timeframe). If None, equal weight.
     indicator_weights: Optional[Dict[str, float]] = None
 
     # Target/stop-loss parameters (from shared.defaults)
@@ -175,7 +248,12 @@ class StrategyConfig:
     
     # Trend filtering (from shared.defaults)
     use_trend_filter: bool = USE_TREND_FILTER  # Only trade in direction of EMA trend
-    
+
+    # Multi-timeframe: confirm daily signals with weekly trend (weekly close vs weekly EMA)
+    use_multi_timeframe: bool = False
+    multi_timeframe_weekly_ema_period: int = 8  # weeks
+    use_multi_timeframe_filter: bool = True  # When False, MTF is indicator-only (weight in indicator_weights.mtf), no drop
+
     # Market regime detection and adaptive signals
     use_regime_detection: bool = False  # Enable market regime detection (ADX + MA slope)
     invert_signals_in_bull: bool = True  # Invert EW signals in bull markets (counter-trend trading)
@@ -203,6 +281,21 @@ class StrategyConfig:
     instruments: List[str] = field(default_factory=lambda: ["djia"])  # Default to DJIA for backward compat
     start_date: Optional[str] = None  # Start date (YYYY-MM-DD), None = use all available data
     end_date: Optional[str] = None    # End date (YYYY-MM-DD), None = use all available data
+
+    def __post_init__(self) -> None:
+        _validate_config(
+            ema_short_period=self.ema_short_period,
+            ema_long_period=self.ema_long_period,
+            rsi_oversold=self.rsi_oversold,
+            rsi_overbought=self.rsi_overbought,
+            risk_reward=self.risk_reward,
+            position_size_pct=self.position_size_pct,
+            min_confidence=self.min_confidence,
+            min_wave_size=self.min_wave_size,
+            min_certainty=self.min_certainty,
+            min_confirmations=self.min_confirmations,
+            multi_timeframe_weekly_ema_period=self.multi_timeframe_weekly_ema_period,
+        )
 
 
 # Current best baseline configuration

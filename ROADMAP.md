@@ -18,6 +18,7 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 ## Next Steps (Priority Order)
 
 ### High Priority
+- **Small-jobs parallelism (evaluate + grid-search):** Today evaluate runs one multi-instrument walk-forward (parallel signal detection only within each eval date); grid-search runs one process per config. Unify on a single primitive: one task = produce all signals for (config, instrument) over the full walk-forward (same eval_dates for every instrument); no portfolio sim in the job. Aggregate: merge signal lists by time, run one portfolio sim per config. Evaluate: one config, N instruments → N parallel jobs, then merge + one sim. Grid-search: M×N jobs (config×instrument), group signals by config, merge + sim once per config. Period is in the config; walk-forward eval dates stay sequential inside each job.
 
 - **restructure signals configuration**: Use a single configuration for indicators. If an indicator should be used, it has to be configured; if it's missing, it's not used. A minimal configuration contains at least a weight for the indicator and the necessary parameters. Filtering is via weighted score or min_confirmations/min_certainty.
   - This might affect the structure of this repo. From my understanding, the elliot wave config is used to generate signals. These are then filtered by the signal/indicator configuration. And then, based on those results, and other criteria, the position size is calculated. Only then, the trade is executed. Please create a flow diagram of the current process, vs this one. Note down pros and cons if there are differences.
@@ -44,23 +45,65 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 
 ### Medium Priority – Config and code quality
 
+- **Try around with indicator vs filters:** Some indicators could be used as filters, or as confirmation. And some filters could be used as indicators.
+
 - **Independent review with fresh AI agent:**
-  - Review the code and tests specifically, but also this whole repository. Among regular review things, ensure the code and tests are correct, make sense and follow best practices. Examples:
-    - Find unused code, make targets, tests, etc.
-    - Suggest code- & test- & all other noteworthy improvements.
-    - Suggest simplifications.
-    - Suggest performance improvements. For example a way to parallelize the computation of all indicators, so it can leverage multiple cores.
-    - Suggest new features.
-    - Suggest strategy improvements.
-    - Suggest improvements to AGENTS.md and DEVELOPMENT.md and the other markdown files.
-  - Add your findings in this ROADMAP.md file.
-  - "Clean up"/improve docstrings right away.
+  - **Test Coverage (61% overall):**
+    - **Low Coverage (<50%):**
+      - `core/data/download.py` (27%) — data downloading logic needs more tests
+      - `core/data/scraper.py` (45%) — instrument scraping needs tests
+      - `core/grid_test/reporter_charts.py` (30%) — chart generation hard to test; consider integration tests
+      - `core/asset_analysis/discovery.py` (31%) — API mocking needed for source fetching
+    - **Missing Coverage:**
+      - `core/signals/target_calculator.py` (63%) — Fibonacci target calculation edge cases
+      - Multi-instrument portfolio constraints (mostly covered, but edge cases remain)
+
+  - **Potential Architecture & Design Improvements:**
+    - **Logging Framework:** Replace ~50+ print() calls with Python `logging` module (levels: DEBUG, INFO, WARNING, ERROR). This enables:
+      - Verbosity control via config/CLI flags
+      - Log file output for long-running grid searches
+      - Structured logging for analysis
+      - Progress tracking without cluttering stdout
+  - **Strategy & Feature Suggestions:**
+    - **Multi-Timeframe Analysis as additional indicator:** Detect patterns on daily, confirm on weekly (mentioned in roadmap; high value for reducing false signals)
+    - **Volume Confirmation:** Add volume indicators (OBV, VWMA) as optional confirmations. Many false breakouts happen on low volume.
+    - **Adaptive Parameters:** Consider regime-aware parameter adjustment (e.g., wider stops in high volatility, tighter in low volatility)
+    - **Correlation-Based Position Sizing:** When trading multiple instruments, reduce position size if instruments are highly correlated (avoids concentration risk)
+    - **Add correlation to other instruments and market volume factors as indicators:** Use correlation and market volume to identify additional trade opportunities and signal strength / confirmation.
+    - **Signal Strength Histogram:** Add visualization of signal distribution by confirmation score to identify threshold sweet spots
+    - **Partial Exits:** Support scaling out of positions (e.g., take 50% at target, leave 50% with trailing stop)
+
+  - **Testing Improvements:**
+    - Add integration tests for end-to-end workflows (config → signals → evaluation → report)
+    - Mock external APIs (yfinance) for deterministic tests
+    - Property-based testing for financial calculations (use `hypothesis` library)
+    - Regression tests for chart generation (image comparison or data structure validation)
+    - Performance regression tests (ensure grid searches don't slow down over time)
+  
+  - **Code Simplifications:**
+    - `walk_forward.py` has some duplicate logic between single-instrument and multi-instrument paths; consider unified flow
+    - Config loading has fallback chains (CLI → YAML → defaults); consolidate into single precedence function
+    - Some indicator confirmation logic is duplicated across buy/sell paths; extract to shared function
+  
+  - **Security & Robustness:**
+    - Add input validation for CLI arguments (e.g., date format, numeric ranges)
+    - Handle network failures gracefully in yfinance downloads (retry logic with exponential backoff)
+    - Add file size limits when reading CSVs to prevent OOM on corrupted files
+  
+  - **Git & Workflow:**
+    - Consider adding:
+      - Pre-commit hooks for linting (black, flake8, mypy)
+  
+  - **Next Steps from This Review:**
+    1. Split reporter.py into smaller modules (maintainability)
+    2. Add logging framework (replaces prints)
+    3. Increase test coverage to 80% (focus: download.py, scraper.py, target_calculator.py)
+    4. Add integration tests for full workflows
+    5. Consider multi-timeframe analysis (strategy improvement)
 
 - **update readme:** Update the README.md file to reflect the current state of the project.
 
-- **Custom signal rules:** Configurable rules without code changes; rule engine; indicator weights/priorities (partially covered by signal quality above).
 - **Config splitting:** Break StrategyConfig into sub-configs (Execution, Indicator, Risk) in the same file.
-- **Config validation:** Validate at creation (e.g. EMA short < long, valid ranges); fail fast with clear errors.
 - **Logging:** Replace prints with a proper logging framework.
 
 ### Medium Priority – Elliott Wave
@@ -142,10 +185,6 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 - **Trading System Integration:** Connect to broker APIs (future)
 - **Trade Execution Types:** Support for long & short trades, plus limit orders, market orders, etc.
 
-### Performance optimization opportunities (monitoring done)
-
-- **Parallelization:** Per-indicator: run RSI, EMA, MACD, ADX, ATR in parallel inside `TechnicalIndicators.calculate_all`. Per-instrument: run instrument loop inside each eval_date in parallel (merge signals afterward).
-
 ### Advanced Features (Experimental)
 
 - Complex Elliott Wave patterns (diagonals, triangles)
@@ -154,7 +193,6 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 - Cross-validation for parameter optimization
 - Quick backtest mode (faster with reduced accuracy for rapid iteration)
 - Grid search resume capability (save progress, skip completed configs)
-- Signal rule extraction (separate SignalRule classes + rule engine)
 - Function refactoring (break down 200-300 line functions for maintainability)
 
 ---

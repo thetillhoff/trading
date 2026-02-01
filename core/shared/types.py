@@ -47,7 +47,10 @@ class TradingSignal:
     
     # Trend filter metadata
     trend_filter_active: bool = False  # Whether trend filter was applied to this signal
-    
+
+    # Multi-timeframe: whether weekly trend (close vs weekly EMA) confirmed this signal; used when MTF is weighted indicator
+    mtf_confirms: Optional[bool] = None
+
     # Instrument identifier (for multi-instrument trading)
     instrument: Optional[str] = None  # Instrument symbol (e.g., "djia", "sp500")
 

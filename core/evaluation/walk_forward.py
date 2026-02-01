@@ -5,6 +5,7 @@ Simulates day-by-day evaluation where signals are generated using only
 historical data available up to each evaluation point, then evaluated
 against actual future outcomes.
 """
+import os
 import pandas as pd
 import numpy as np
 from typing import List, Optional, Tuple, Dict
@@ -18,6 +19,12 @@ from ..signals.config import StrategyConfig, SignalConfig
 from ..signals.detector import SignalDetector
 from ..signals.target_calculator import TargetCalculator
 from .portfolio import PortfolioSimulator, SimulationResult
+from .walk_forward_types import (
+    TradeOutcome,
+    TradeEvaluation,
+    EvaluationSummary,
+    WalkForwardResult,
+)
 from ..shared.types import SignalType, TradingSignal
 from ..shared.defaults import (
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
@@ -25,97 +32,120 @@ from ..shared.defaults import (
     MACD_FAST, MACD_SLOW, MACD_SIGNAL,
     ELLIOTT_INVERTED_MIN_CONFIDENCE, ELLIOTT_INVERTED_MIN_WAVE_SIZE,
 )
-
-# Define classes for backward compatibility
-from dataclasses import dataclass
-from typing import Optional
-from enum import Enum
-
-class TradeOutcome(Enum):
-    """Possible outcomes for a trade."""
-    TARGET_HIT = "target_hit"  # Target price reached before stop-loss
-    STOP_LOSS_HIT = "stop_loss_hit"  # Stop-loss hit before target
-    NO_OUTCOME = "no_outcome"  # Neither target nor stop-loss hit (still open or data ended)
-    INVALID = "invalid"  # Invalid signal (missing target or stop-loss)
-
-@dataclass
-class TradeEvaluation:
-    """Evaluation result for a single trade."""
-    signal: any  # TradingSignal - using any to avoid import
-    outcome: TradeOutcome
-    exit_price: Optional[float]  # Price at which trade exited (target or stop-loss)
-    exit_timestamp: Optional[pd.Timestamp]  # When the trade exited
-    gain_percentage: float  # Percentage gain/loss (-100% if stop-loss hit)
-    days_held: Optional[int]  # Number of days the trade was held
-    max_favorable_excursion: float  # Maximum favorable price movement (%)
-    max_adverse_excursion: float  # Maximum adverse price movement (%)
-
-@dataclass
-class EvaluationSummary:
-    """Summary statistics for all evaluated trades."""
-    total_trades: int
-    winning_trades: int
-    losing_trades: int
-    no_outcome_trades: int
-    win_rate: float  # Percentage of trades that hit target
-    average_gain: float  # Average percentage gain (only winning trades)
-    average_loss: float  # Average percentage loss (only losing trades)
-    total_gain: float  # Sum of all percentage gains/losses
-    best_trade: Optional = None
-    worst_trade: Optional = None
-    average_days_held: Optional[float] = None
-
-# Alias for backward compatibility
-Signal = TradingSignal
-ConfigurableSignalDetector = SignalDetector
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import multiprocessing
 
+# Aliases for backward compatibility
+Signal = TradingSignal
+ConfigurableSignalDetector = SignalDetector
 
-@dataclass
-class WalkForwardResult:
-    """Results from a walk-forward evaluation."""
-    config: StrategyConfig
-    
-    # Portfolio simulation results
-    simulation: SimulationResult
-    
-    # Walk-forward specific metrics
-    evaluation_start_date: pd.Timestamp
-    evaluation_end_date: pd.Timestamp
-    lookback_days: int
-    step_days: int
-    
-    # Performance metrics (derived from simulation)
-    buy_and_hold_gain: float = 0.0  # Full 100% invested market return
-    exposure_adjusted_market: float = 0.0  # Market return scaled to strategy's avg exposure
-    outperformance: float = 0.0  # vs exposure-adjusted market (fair comparison)
-    
-    # Hybrid strategy metrics (active + passive in buy-and-hold)
-    hybrid_return: float = 0.0  # Combined: active portion + passive portion earning market return
-    active_alpha: float = 0.0   # Hybrid return - pure buy-and-hold (the value added by active trading)
-    
-    # Performance monitoring (optional): phase and per-indicator timings in seconds
-    performance_timings: Optional[Dict[str, float]] = None
-    
-    # For backward compatibility
-    @property
-    def summary(self) -> EvaluationSummary:
-        """Create a summary compatible with old interface."""
-        return EvaluationSummary(
-            total_trades=self.simulation.total_trades,
-            winning_trades=self.simulation.winning_trades,
-            losing_trades=self.simulation.losing_trades,
-            no_outcome_trades=0,
-            win_rate=self.simulation.win_rate,
-            average_gain=0.0,  # Not tracked in new sim
-            average_loss=0.0,
-            total_gain=self.simulation.total_return_pct,
-            best_trade=None,
-            worst_trade=None,
-            average_days_held=self.simulation.avg_days_held,
-        )
+# Extra calendar days when requesting load_start so the first trading day in data
+# still gives at least lookback_days of history (avoids "only N days available" when
+# eval_start - lookback_days falls on weekend/holiday)
+LOOKBACK_CALENDAR_BUFFER_DAYS = 14
+
+
+def _signal_config_from_strategy(config: StrategyConfig) -> SignalConfig:
+    """Build SignalConfig from StrategyConfig. Single place for detector config (extensibility)."""
+    return SignalConfig(
+        use_elliott_wave=getattr(config, 'use_elliott_wave', True),
+        min_confidence=config.min_confidence,
+        min_wave_size=config.min_wave_size,
+        use_elliott_wave_inverted=getattr(config, 'use_elliott_wave_inverted', False),
+        use_elliott_wave_inverted_exit=getattr(config, 'use_elliott_wave_inverted_exit', False),
+        min_confidence_inverted=getattr(config, 'min_confidence_inverted', ELLIOTT_INVERTED_MIN_CONFIDENCE),
+        min_wave_size_inverted=getattr(config, 'min_wave_size_inverted', ELLIOTT_INVERTED_MIN_WAVE_SIZE),
+        use_rsi=getattr(config, 'use_rsi', False),
+        use_ema=getattr(config, 'use_ema', False),
+        use_macd=getattr(config, 'use_macd', False),
+        rsi_period=getattr(config, 'rsi_period', RSI_PERIOD),
+        rsi_oversold=getattr(config, 'rsi_oversold', RSI_OVERSOLD),
+        rsi_overbought=getattr(config, 'rsi_overbought', RSI_OVERBOUGHT),
+        ema_short_period=getattr(config, 'ema_short_period', EMA_SHORT_PERIOD),
+        ema_long_period=getattr(config, 'ema_long_period', EMA_LONG_PERIOD),
+        macd_fast=getattr(config, 'macd_fast', MACD_FAST),
+        macd_slow=getattr(config, 'macd_slow', MACD_SLOW),
+        macd_signal=getattr(config, 'macd_signal', MACD_SIGNAL),
+        signal_types=getattr(config, 'signal_types', 'all'),
+        min_confirmations=getattr(config, 'min_confirmations', None),
+        min_certainty=getattr(config, 'min_certainty', None),
+        use_trend_filter=getattr(config, 'use_trend_filter', False),
+        indicator_weights=getattr(config, 'indicator_weights', None),
+        use_regime_detection=getattr(config, 'use_regime_detection', False),
+        invert_signals_in_bull=getattr(config, 'invert_signals_in_bull', True),
+        adx_threshold=getattr(config, 'adx_threshold', 30.0),
+        regime_mode=getattr(config, 'regime_mode', 'adx_ma'),
+        regime_vol_window=getattr(config, 'regime_vol_window', 20),
+        regime_vol_threshold=getattr(config, 'regime_vol_threshold', 0.015),
+        regime_slope_window=getattr(config, 'regime_slope_window', 5),
+        regime_slope_threshold=getattr(config, 'regime_slope_threshold', 0.0005),
+        use_volatility_filter=getattr(config, 'use_volatility_filter', False),
+        volatility_max=getattr(config, 'volatility_max', 0.02),
+        use_multi_timeframe=getattr(config, 'use_multi_timeframe', False),
+        multi_timeframe_weekly_ema_period=getattr(config, 'multi_timeframe_weekly_ema_period', 8),
+        use_multi_timeframe_filter=getattr(config, 'use_multi_timeframe_filter', True),
+    )
+
+
+def _portfolio_simulator_from_config(config: StrategyConfig) -> PortfolioSimulator:
+    """Build PortfolioSimulator from StrategyConfig. Single place for sim config (extensibility)."""
+    return PortfolioSimulator(
+        initial_capital=getattr(config, 'initial_capital', 10000.0),
+        position_size_pct=getattr(config, 'position_size_pct', 0.2),
+        max_positions=getattr(config, 'max_positions', None),
+        max_positions_per_instrument=getattr(config, 'max_positions_per_instrument', None),
+        max_days=config.max_days,
+        use_confidence_sizing=getattr(config, 'use_confidence_sizing', False),
+        use_confirmation_modulation=getattr(config, 'use_confirmation_modulation', False),
+        confirmation_size_factors=getattr(config, 'confirmation_size_factors', None),
+        use_volatility_sizing=getattr(config, 'use_volatility_sizing', False),
+        volatility_threshold=getattr(config, 'volatility_threshold', 0.03),
+        volatility_size_reduction=getattr(config, 'volatility_size_reduction', 0.5),
+        use_flexible_sizing=getattr(config, 'use_flexible_sizing', False),
+        flexible_sizing_method=getattr(config, 'flexible_sizing_method', 'confidence'),
+        flexible_sizing_target_rr=getattr(config, 'flexible_sizing_target_rr', 2.5),
+        trade_fee_pct=getattr(config, 'trade_fee_pct', None),
+        trade_fee_absolute=getattr(config, 'trade_fee_absolute', None),
+        trade_fee_min=getattr(config, 'trade_fee_min', None),
+        trade_fee_max=getattr(config, 'trade_fee_max', None),
+        min_position_size=getattr(config, 'min_position_size', None),
+    )
+
+
+def _signals_for_instrument_at_date(
+    eval_date: pd.Timestamp,
+    inst: str,
+    data_inst: pd.Series,
+    config: StrategyConfig,
+    lookback_days: int,
+    min_history: int,
+    signal_detector: SignalDetector,
+    target_calculator: TargetCalculator,
+) -> List[TradingSignal]:
+    """
+    Generate signals for one instrument at one eval_date. Used by per-instrument parallel loop.
+    Returns list of signals with .instrument set; caller dedupes and merges.
+    """
+    lookback_start = eval_date - timedelta(days=lookback_days)
+    historical_data = data_inst[
+        (data_inst.index >= lookback_start) & (data_inst.index <= eval_date)
+    ]
+    if len(historical_data) < min_history:
+        return []
+    signals, _indicator_df, all_waves = signal_detector.detect_signals_with_indicators(
+        historical_data, timings=None
+    )
+    if not signals:
+        return []
+    signals_with_targets = target_calculator.calculate_targets(
+        signals,
+        historical_data,
+        all_waves=all_waves if getattr(config, "use_wave_relationship_targets", True) else None,
+    )
+    for s in signals_with_targets:
+        s.instrument = inst
+    return signals_with_targets
 
 
 class WalkForwardEvaluator:
@@ -295,52 +325,13 @@ class WalkForwardEvaluator:
         signals_by_date = {}
         seen_signal_keys = set()  # Track unique signals to avoid duplicates
         
-        # Import TargetCalculator from core
         target_calculator = TargetCalculator(
             risk_reward_ratio=config.risk_reward,
             use_atr_stops=getattr(config, 'use_atr_stops', False),
             atr_stop_multiplier=getattr(config, 'atr_stop_multiplier', 2.0),
             atr_period=getattr(config, 'atr_period', 14)
         )
-        
-        # Create signal detector based on strategy config
-        signal_config = SignalConfig(
-            use_elliott_wave=getattr(config, 'use_elliott_wave', True),
-            min_confidence=config.min_confidence,
-            min_wave_size=config.min_wave_size,
-            use_elliott_wave_inverted=getattr(config, 'use_elliott_wave_inverted', False),
-            use_elliott_wave_inverted_exit=getattr(config, 'use_elliott_wave_inverted_exit', False),
-            min_confidence_inverted=getattr(config, 'min_confidence_inverted', ELLIOTT_INVERTED_MIN_CONFIDENCE),
-            min_wave_size_inverted=getattr(config, 'min_wave_size_inverted', ELLIOTT_INVERTED_MIN_WAVE_SIZE),
-            use_rsi=getattr(config, 'use_rsi', False),
-            use_ema=getattr(config, 'use_ema', False),
-            use_macd=getattr(config, 'use_macd', False),
-            # Indicator parameters (from shared.defaults - single source of truth)
-            rsi_period=getattr(config, 'rsi_period', RSI_PERIOD),
-            rsi_oversold=getattr(config, 'rsi_oversold', RSI_OVERSOLD),
-            rsi_overbought=getattr(config, 'rsi_overbought', RSI_OVERBOUGHT),
-            ema_short_period=getattr(config, 'ema_short_period', EMA_SHORT_PERIOD),
-            ema_long_period=getattr(config, 'ema_long_period', EMA_LONG_PERIOD),
-            macd_fast=getattr(config, 'macd_fast', MACD_FAST),
-            macd_slow=getattr(config, 'macd_slow', MACD_SLOW),
-            macd_signal=getattr(config, 'macd_signal', MACD_SIGNAL),
-            signal_types=getattr(config, 'signal_types', 'all'),
-            min_confirmations=getattr(config, 'min_confirmations', None),
-            min_certainty=getattr(config, 'min_certainty', None),
-            use_trend_filter=getattr(config, 'use_trend_filter', False),
-            indicator_weights=getattr(config, 'indicator_weights', None),
-            use_regime_detection=getattr(config, 'use_regime_detection', False),
-            invert_signals_in_bull=getattr(config, 'invert_signals_in_bull', True),
-            adx_threshold=getattr(config, 'adx_threshold', 30.0),
-            regime_mode=getattr(config, 'regime_mode', 'adx_ma'),
-            regime_vol_window=getattr(config, 'regime_vol_window', 20),
-            regime_vol_threshold=getattr(config, 'regime_vol_threshold', 0.015),
-            regime_slope_window=getattr(config, 'regime_slope_window', 5),
-            regime_slope_threshold=getattr(config, 'regime_slope_threshold', 0.0005),
-            use_volatility_filter=getattr(config, 'use_volatility_filter', False),
-            volatility_max=getattr(config, 'volatility_max', 0.02),
-        )
-        signal_detector = SignalDetector(signal_config)
+        signal_detector = SignalDetector(_signal_config_from_strategy(config))
         
         total_eval_dates = len(eval_dates)
         progress_interval = max(1, total_eval_dates // 10)  # Show ~10 progress updates
@@ -405,31 +396,9 @@ class WalkForwardEvaluator:
         print(f"  Signal detection completed in {elapsed_total:.1f}s" + " " * 30, flush=True)  # Padding to clear previous line
         print(f"  Total unique signals detected: {len(all_signals)}")
         
-        # Use portfolio simulator for realistic capital management
         print("  Simulating portfolio...", flush=True)
-        
-        portfolio_sim = PortfolioSimulator(
-            initial_capital=getattr(config, 'initial_capital', 10000.0),
-            position_size_pct=getattr(config, 'position_size_pct', 0.2),  # 20% per trade default
-            max_positions=getattr(config, 'max_positions', None),  # None = unlimited when omitted in config
-            max_positions_per_instrument=getattr(config, 'max_positions_per_instrument', None),
-            max_days=config.max_days,
-            use_confidence_sizing=getattr(config, 'use_confidence_sizing', False),
-            use_confirmation_modulation=getattr(config, 'use_confirmation_modulation', False),
-            confirmation_size_factors=getattr(config, 'confirmation_size_factors', None),
-            use_volatility_sizing=getattr(config, 'use_volatility_sizing', False),
-            volatility_threshold=getattr(config, 'volatility_threshold', 0.03),
-            volatility_size_reduction=getattr(config, 'volatility_size_reduction', 0.5),
-            use_flexible_sizing=getattr(config, 'use_flexible_sizing', False),
-            flexible_sizing_method=getattr(config, 'flexible_sizing_method', 'confidence'),
-            flexible_sizing_target_rr=getattr(config, 'flexible_sizing_target_rr', 2.5),
-            trade_fee_pct=getattr(config, 'trade_fee_pct', None),
-            trade_fee_absolute=getattr(config, 'trade_fee_absolute', None),
-            trade_fee_min=getattr(config, 'trade_fee_min', None),
-            trade_fee_max=getattr(config, 'trade_fee_max', None),
-            min_position_size=getattr(config, 'min_position_size', None),
-        )
-        
+        portfolio_sim = _portfolio_simulator_from_config(config)
+
         # Simulate the strategy
         eval_data = data[(data.index >= start_date) & (data.index <= end_date)]
         sim_start_time = time.time()
@@ -499,18 +468,22 @@ class WalkForwardEvaluator:
     def evaluate_multi_instrument(
         self,
         config: StrategyConfig,
-        verbose: bool = True
+        verbose: bool = True,
+        max_workers: Optional[int] = None,
     ) -> WalkForwardResult:
         """
         Evaluate strategy across multiple instruments with unified results.
-        
+
         For single instrument: delegates to standard evaluate()
-        For multiple instruments: combines signals from all instruments
-        
+        For multiple instruments: combines signals from all instruments.
+        When multiple instruments and max_workers > 1, runs per-instrument
+        signal detection in parallel at each eval_date.
+
         Args:
             config: Strategy configuration (must include instruments, start_date, end_date)
             verbose: Print progress information
-            
+            max_workers: Parallel workers for instrument loop (default: min(K, cpu_count())); 1 = sequential.
+
         Returns:
             WalkForwardResult with combined trades from all instruments
         """
@@ -526,7 +499,7 @@ class WalkForwardEvaluator:
             load_start = config.start_date
             if config.start_date:
                 eval_start_ts = pd.Timestamp(config.start_date)
-                load_start = (eval_start_ts - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+                load_start = (eval_start_ts - timedelta(days=lookback_days + LOOKBACK_CALENDAR_BUFFER_DAYS)).strftime('%Y-%m-%d')
             if verbose:
                 print(f"Evaluating on 1 instrument: {instrument}")
                 print(f"Date range: {config.start_date or 'earliest'} to {config.end_date or 'latest'}")
@@ -564,7 +537,7 @@ class WalkForwardEvaluator:
         load_start = config.start_date
         if config.start_date:
             eval_start_ts = pd.Timestamp(config.start_date)
-            load_start = (eval_start_ts - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+            load_start = (eval_start_ts - timedelta(days=lookback_days + LOOKBACK_CALENDAR_BUFFER_DAYS)).strftime('%Y-%m-%d')
         performance_timings: Dict[str, float] = {}
 
         t0_load = time.perf_counter()
@@ -611,70 +584,70 @@ class WalkForwardEvaluator:
             atr_stop_multiplier=getattr(config, 'atr_stop_multiplier', 2.0),
             atr_period=getattr(config, 'atr_period', 14)
         )
-        signal_config = SignalConfig(
-            use_elliott_wave=getattr(config, 'use_elliott_wave', True),
-            min_confidence=config.min_confidence,
-            min_wave_size=config.min_wave_size,
-            use_elliott_wave_inverted=getattr(config, 'use_elliott_wave_inverted', False),
-            use_elliott_wave_inverted_exit=getattr(config, 'use_elliott_wave_inverted_exit', False),
-            min_confidence_inverted=getattr(config, 'min_confidence_inverted', ELLIOTT_INVERTED_MIN_CONFIDENCE),
-            min_wave_size_inverted=getattr(config, 'min_wave_size_inverted', ELLIOTT_INVERTED_MIN_WAVE_SIZE),
-            use_rsi=getattr(config, 'use_rsi', False),
-            use_ema=getattr(config, 'use_ema', False),
-            use_macd=getattr(config, 'use_macd', False),
-            rsi_period=getattr(config, 'rsi_period', RSI_PERIOD),
-            rsi_oversold=getattr(config, 'rsi_oversold', RSI_OVERSOLD),
-            rsi_overbought=getattr(config, 'rsi_overbought', RSI_OVERBOUGHT),
-            ema_short_period=getattr(config, 'ema_short_period', EMA_SHORT_PERIOD),
-            ema_long_period=getattr(config, 'ema_long_period', EMA_LONG_PERIOD),
-            macd_fast=getattr(config, 'macd_fast', MACD_FAST),
-            macd_slow=getattr(config, 'macd_slow', MACD_SLOW),
-            macd_signal=getattr(config, 'macd_signal', MACD_SIGNAL),
-            signal_types=getattr(config, 'signal_types', 'all'),
-            min_confirmations=getattr(config, 'min_confirmations', None),
-            min_certainty=getattr(config, 'min_certainty', None),
-            use_trend_filter=getattr(config, 'use_trend_filter', False),
-            indicator_weights=getattr(config, 'indicator_weights', None),
-            use_regime_detection=getattr(config, 'use_regime_detection', False),
-            invert_signals_in_bull=getattr(config, 'invert_signals_in_bull', True),
-            adx_threshold=getattr(config, 'adx_threshold', 30.0),
-            regime_mode=getattr(config, 'regime_mode', 'adx_ma'),
-            regime_vol_window=getattr(config, 'regime_vol_window', 20),
-            regime_vol_threshold=getattr(config, 'regime_vol_threshold', 0.015),
-            regime_slope_window=getattr(config, 'regime_slope_window', 5),
-            regime_slope_threshold=getattr(config, 'regime_slope_threshold', 0.0005),
-            use_volatility_filter=getattr(config, 'use_volatility_filter', False),
-            volatility_max=getattr(config, 'volatility_max', 0.02),
-        )
-        signal_detector = SignalDetector(signal_config)
+        signal_detector = SignalDetector(_signal_config_from_strategy(config))
         total_eval_dates = len(eval_dates)
         progress_interval = max(1, total_eval_dates // 10)
         start_time = time.time()
 
+        use_parallel = len(config.instruments) > 1 and (max_workers is None or max_workers > 1)
+        workers = (
+            min(len(config.instruments), max_workers or (os.cpu_count() or 1))
+            if use_parallel
+            else 1
+        )
+
+        if use_parallel and verbose:
+            print(f"  Signal detection: {workers} parallel workers (per instrument at each date)", flush=True)
+
         for i, eval_date in enumerate(eval_dates):
-            lookback_start = eval_date - timedelta(days=lookback_days)
-            for inst in config.instruments:
-                data_inst = data_by_instrument[inst]
-                historical_data = data_inst[(data_inst.index >= lookback_start) & (data_inst.index <= eval_date)]
-                if len(historical_data) < min_history:
-                    continue
-                signals, indicator_df, all_waves = signal_detector.detect_signals_with_indicators(
-                    historical_data, timings=performance_timings
-                )
-                if not signals:
-                    continue
-                signals_with_targets = target_calculator.calculate_targets(
-                    signals,
-                    historical_data,
-                    all_waves=all_waves if getattr(config, "use_wave_relationship_targets", True) else None,
-                )
-                for signal in signals_with_targets:
-                    signal.instrument = inst
-                    signal_key = (signal.timestamp, signal.signal_type, signal.price, inst)
-                    if signal_key in seen_signal_keys:
+            if use_parallel:
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = {
+                        executor.submit(
+                            _signals_for_instrument_at_date,
+                            eval_date,
+                            inst,
+                            data_by_instrument[inst],
+                            config,
+                            lookback_days,
+                            min_history,
+                            signal_detector,
+                            target_calculator,
+                        ): inst
+                        for inst in config.instruments
+                    }
+                    for future in as_completed(futures):
+                        signals_batch = future.result()
+                        for signal in signals_batch:
+                            signal_key = (signal.timestamp, signal.signal_type, signal.price, signal.instrument)
+                            if signal_key in seen_signal_keys:
+                                continue
+                            seen_signal_keys.add(signal_key)
+                            all_signals.append(signal)
+            else:
+                lookback_start = eval_date - timedelta(days=lookback_days)
+                for inst in config.instruments:
+                    data_inst = data_by_instrument[inst]
+                    historical_data = data_inst[(data_inst.index >= lookback_start) & (data_inst.index <= eval_date)]
+                    if len(historical_data) < min_history:
                         continue
-                    seen_signal_keys.add(signal_key)
-                    all_signals.append(signal)
+                    signals, indicator_df, all_waves = signal_detector.detect_signals_with_indicators(
+                        historical_data, timings=performance_timings
+                    )
+                    if not signals:
+                        continue
+                    signals_with_targets = target_calculator.calculate_targets(
+                        signals,
+                        historical_data,
+                        all_waves=all_waves if getattr(config, "use_wave_relationship_targets", True) else None,
+                    )
+                    for signal in signals_with_targets:
+                        signal.instrument = inst
+                        signal_key = (signal.timestamp, signal.signal_type, signal.price, inst)
+                        if signal_key in seen_signal_keys:
+                            continue
+                        seen_signal_keys.add(signal_key)
+                        all_signals.append(signal)
             if (i + 1) % progress_interval == 0 or i == total_eval_dates - 1:
                 pct = ((i + 1) / total_eval_dates) * 100
                 elapsed = time.time() - start_time
@@ -694,27 +667,7 @@ class WalkForwardEvaluator:
         }
 
         print("  Simulating portfolio...", flush=True)
-        portfolio_sim = PortfolioSimulator(
-            initial_capital=getattr(config, 'initial_capital', 10000.0),
-            position_size_pct=getattr(config, 'position_size_pct', 0.2),
-            max_positions=getattr(config, 'max_positions', None),
-            max_positions_per_instrument=getattr(config, 'max_positions_per_instrument', None),
-            max_days=config.max_days,
-            use_confidence_sizing=getattr(config, 'use_confidence_sizing', False),
-            use_confirmation_modulation=getattr(config, 'use_confirmation_modulation', False),
-            confirmation_size_factors=getattr(config, 'confirmation_size_factors', None),
-            use_volatility_sizing=getattr(config, 'use_volatility_sizing', False),
-            volatility_threshold=getattr(config, 'volatility_threshold', 0.03),
-            volatility_size_reduction=getattr(config, 'volatility_size_reduction', 0.5),
-            use_flexible_sizing=getattr(config, 'use_flexible_sizing', False),
-            flexible_sizing_method=getattr(config, 'flexible_sizing_method', 'confidence'),
-            flexible_sizing_target_rr=getattr(config, 'flexible_sizing_target_rr', 2.5),
-            trade_fee_pct=getattr(config, 'trade_fee_pct', None),
-            trade_fee_absolute=getattr(config, 'trade_fee_absolute', None),
-            trade_fee_min=getattr(config, 'trade_fee_min', None),
-            trade_fee_max=getattr(config, 'trade_fee_max', None),
-            min_position_size=getattr(config, 'min_position_size', None),
-        )
+        portfolio_sim = _portfolio_simulator_from_config(config)
         sim_start_time = time.time()
         simulation = portfolio_sim.simulate_strategy(
             prices_by_instrument,

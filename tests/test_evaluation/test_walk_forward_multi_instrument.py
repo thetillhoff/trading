@@ -111,3 +111,39 @@ def test_evaluate_multi_instrument_positions_tagged_by_instrument():
     for pos in result.simulation.positions:
         assert pos.instrument is not None
         assert pos.instrument in ("inst_a", "inst_b")
+
+
+def test_evaluate_multi_instrument_parallel_matches_sequential():
+    """Parallel (max_workers=2) and sequential (max_workers=1) produce same trade count and summary."""
+    series = _synthetic_series(400)
+    data_by_inst = {"i1": series, "i2": series.copy()}
+
+    def fake_from_instrument(instrument_name, start_date=None, end_date=None, column="Close"):
+        return data_by_inst[instrument_name]
+
+    config = StrategyConfig(
+        name="two",
+        instruments=["i1", "i2"],
+        start_date="2010-06-01",
+        end_date="2011-06-01",
+        lookback_days=180,
+        step_days=30,
+        use_elliott_wave=True,
+        min_confidence=0.3,
+        min_wave_size=0.01,
+        use_rsi=True,
+        use_ema=True,
+        use_macd=True,
+        risk_reward=2.0,
+        max_days=60,
+        position_size_pct=0.2,
+        max_positions=5,
+    )
+
+    with patch("core.data.loader.DataLoader.from_instrument", fake_from_instrument):
+        evaluator = WalkForwardEvaluator(lookback_days=180, step_days=30, min_history_days=100)
+        result_seq = evaluator.evaluate_multi_instrument(config, verbose=False, max_workers=1)
+        result_par = evaluator.evaluate_multi_instrument(config, verbose=False, max_workers=2)
+
+    assert result_par.simulation.total_trades == result_seq.simulation.total_trades
+    assert result_par.summary.total_trades == result_seq.summary.total_trades

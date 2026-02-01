@@ -42,6 +42,55 @@ class TestStrategyConfig:
         assert config.use_rsi is False
 
 
+class TestConfigValidation:
+    """Config validation fails fast with clear errors."""
+
+    def test_ema_short_must_be_less_than_long(self):
+        with pytest.raises(ValueError, match="EMA short_period.*must be less than long_period"):
+            StrategyConfig(
+                name="bad",
+                ema_short_period=50,
+                ema_long_period=20,
+            )
+
+    def test_rsi_oversold_must_be_less_than_overbought(self):
+        with pytest.raises(ValueError, match="RSI oversold.*must be less than overbought"):
+            StrategyConfig(
+                name="bad",
+                rsi_oversold=80,
+                rsi_overbought=25,
+            )
+
+    def test_risk_reward_must_be_positive(self):
+        with pytest.raises(ValueError, match="risk_reward must be > 0"):
+            StrategyConfig(name="bad", risk_reward=0)
+        with pytest.raises(ValueError, match="risk_reward must be > 0"):
+            StrategyConfig(name="bad", risk_reward=-1.0)
+
+    def test_position_size_pct_must_be_in_zero_one(self):
+        with pytest.raises(ValueError, match="position_size_pct must be in"):
+            StrategyConfig(name="bad", position_size_pct=0)
+        with pytest.raises(ValueError, match="position_size_pct must be in"):
+            StrategyConfig(name="bad", position_size_pct=1.5)
+
+    def test_min_certainty_must_be_in_zero_one(self):
+        with pytest.raises(ValueError, match="min_certainty must be in"):
+            StrategyConfig(name="bad", min_certainty=1.5)
+
+    def test_multi_timeframe_weekly_ema_period_must_be_at_least_one(self):
+        with pytest.raises(ValueError, match="multi_timeframe_weekly_ema_period must be >= 1"):
+            StrategyConfig(name="bad", multi_timeframe_weekly_ema_period=0)
+
+    def test_min_confirmations_must_be_non_negative(self):
+        with pytest.raises(ValueError, match="min_confirmations must be >= 0"):
+            StrategyConfig(name="bad", min_confirmations=-1)
+
+    def test_signal_config_validates_ema_rsi(self):
+        from core.signals.config import SignalConfig
+        with pytest.raises(ValueError, match="EMA short_period"):
+            SignalConfig(ema_short_period=50, ema_long_period=20)
+
+
 class TestGridGeneration:
     """Test grid configuration generation."""
     

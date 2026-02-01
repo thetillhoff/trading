@@ -114,6 +114,9 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         min_certainty=signals.get('min_certainty'),
         use_trend_filter=signals.get('use_trend_filter', USE_TREND_FILTER),
         indicator_weights=signals.get('indicator_weights'),
+        use_multi_timeframe=signals.get('use_multi_timeframe', False),
+        multi_timeframe_weekly_ema_period=signals.get('multi_timeframe_weekly_ema_period', 8),
+        use_multi_timeframe_filter=signals.get('use_multi_timeframe_filter', True),
         
         # Risk management
         risk_reward=risk.get('risk_reward', RISK_REWARD_RATIO),
@@ -239,6 +242,9 @@ def save_config_to_yaml(config: StrategyConfig, yaml_path: Union[str, Path]):
             'indicator_weights': config.indicator_weights,
             'use_volatility_filter': config.use_volatility_filter,
             'volatility_max': config.volatility_max,
+            'use_multi_timeframe': config.use_multi_timeframe,
+            'multi_timeframe_weekly_ema_period': config.multi_timeframe_weekly_ema_period,
+            'use_multi_timeframe_filter': config.use_multi_timeframe_filter,
         },
         
         'regime': {

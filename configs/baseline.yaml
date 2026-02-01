@@ -34,6 +34,8 @@ signals:
   # min_confirmations: 2 # optional: require at least N indicator confirmations
   min_certainty: 0.5 # from signal-quality grid (best alpha on 2008-2012 DJIA)
   use_trend_filter: false # gate entries by trend (rejected in tests)
+  use_multi_timeframe: true # confirm daily signals with weekly trend (close vs weekly EMA); hypothesis test: 8-week EMA best
+  multi_timeframe_weekly_ema_period: 8 # weeks; grid-search best (18.72% alpha, 92% win rate vs no_mtf 18.31%, 82.9%)
   indicator_weights: # weights for confirmation score (rsi, ema, macd)
     rsi: 0.6
     ema: 0.2
@@ -58,7 +60,7 @@ evaluation:
 
 data:
   instruments:
-    - djia # instrument keys (e.g. djia, sp500)
+    - sp500 # S&P 500 (^GSPC); run "make download-baseline" once before make evaluate
   start_date: '2008-01-01'
   # end_date: '2020-01-01'
   end_date: '2012-01-01'

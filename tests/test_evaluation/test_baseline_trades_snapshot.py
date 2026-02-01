@@ -2,9 +2,9 @@
 Baseline trades snapshot test: current run matches stored golden snapshot.
 
 Ensures indicators and the evaluation pipeline have not regressed since
-hypotheses were based on them. Requires djia data for 2012; run
-`make baseline-snapshot-generate` after `make download` to create/refresh
-the golden file.
+hypotheses were based on them. Requires data for the instrument in
+configs/baseline.yaml (e.g. sp500); run `make download-baseline` then
+`make baseline-snapshot-generate` to create/refresh the golden file.
 
 When baseline config changes, row/column mismatch is expected. Set
 UPDATE_BASELINE_SNAPSHOT=1 and re-run the test to refresh the snapshot
@@ -41,7 +41,7 @@ def test_baseline_trades_match_short_timespan_snapshot():
     """Current baseline trades on 2012 match the stored golden snapshot."""
     if not SNAPSHOT_PATH.exists():
         pytest.skip(
-            "Baseline snapshot not found; run make baseline-snapshot-generate after make download."
+            "Baseline snapshot not found; run make download-baseline then make baseline-snapshot-generate."
         )
 
     config = load_config_from_yaml(str(TESTS_DIR.parent / "configs" / "baseline.yaml"))
@@ -56,13 +56,13 @@ def test_baseline_trades_match_short_timespan_snapshot():
         result = evaluator.evaluate_multi_instrument(config, verbose=False)
     except Exception as e:
         pytest.skip(
-            f"Baseline snapshot test requires djia data for 2012; run make download first. ({e})"
+            f"Baseline snapshot test requires baseline instrument data for 2012; run make download-baseline. ({e})"
         )
 
     current = trades_to_dataframe(result)
     if current.empty:
         pytest.skip(
-            "No trades produced (missing or insufficient data for 2012); run make download first."
+            "No trades produced (missing or insufficient data for 2012); run make download-baseline."
         )
 
     expected = pd.read_csv(SNAPSHOT_PATH)

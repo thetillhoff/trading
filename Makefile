@@ -1,4 +1,4 @@
-.PHONY: help clean download evaluate grid-search asset-analysis test test-cov baseline-snapshot-generate hypothesis-long-short hypothesis-pretrade
+.PHONY: help clean download evaluate grid-search asset-analysis test test-cov baseline-snapshot-generate
 
 # Default target
 help:
@@ -6,6 +6,7 @@ help:
 	@echo ""
 	@echo "Core Commands:"
 	@echo "  make download              Download/update market data for instruments"
+	@echo "  make download-baseline     Download data for baseline config (run once before make evaluate)"
 	@echo "  make evaluate              Evaluate a strategy (default: baseline.yaml, generates charts)"
 	@echo "  make grid-search           Compare multiple configs from configs/ (auto-parallel, auto-charts)"
 	@echo "  make hypothesis-tests      Run multi-period hypothesis suites (category/period selection)"
@@ -13,16 +14,15 @@ help:
 	@echo "  make test                  Run tests with pytest"
 	@echo "  make test-cov              Run tests with coverage report (development only)"
 	@echo "  make baseline-snapshot-generate  Create/refresh baseline trades snapshot (2012; for regression test)"
-	@echo "  make hypothesis-long-short       Print long vs short trade breakdown from latest baseline trades CSV"
-	@echo "  make hypothesis-pretrade          Print pre-trade predictor breakdown (confirmations, certainty, RSI, trend)"
 	@echo ""
 	@echo "Command Options (append to any command):"
 	@echo "  ARGS='...'                 Pass CLI arguments"
 	@echo ""
 	@echo "Examples:"
+	@echo "  make download-baseline                                 # One-time: fetch baseline data (sp500)"
 	@echo "  make download ARGS='--list'                           # List available instruments"
-	@echo "  make download ARGS='djia sp500'                       # Download specific data"
-	@echo "  make evaluate                                           # Evaluate baseline.yaml with charts"
+	@echo "  make download ARGS='sp500 djia'                       # Download specific data"
+	@echo "  make evaluate                                           # Evaluate baseline.yaml (after download-baseline)"
 	@echo "  make evaluate ARGS='--config configs/top_performers/ew_rsi.yaml'"
 	@echo "  make grid-search                                         # Test all configs in configs/"
 	@echo "  make grid-search ARGS='--config-dir configs/optimization'  # Test specific subdirectory"
@@ -50,18 +50,15 @@ help:
 	@echo "Cleanup:"
 	@echo "  make clean                 Remove unused Docker images"
 
-# Pass PRODUCTION flag to sub-make
-ifdef PRODUCTION
-  PROD_FLAG = PRODUCTION=1
-else
-  PROD_FLAG =
-endif
-
 # Unified CLI (runs in Docker)
 DOCKER_CLI = docker compose run --rm --build cli python -u -m
 
 download:
 	$(DOCKER_CLI) cli.download $(ARGS)
+
+# Baseline uses sp500; download once so "make evaluate" works without args
+download-baseline:
+	$(DOCKER_CLI) cli.download sp500
 
 evaluate:
 	$(DOCKER_CLI) cli.evaluate $(ARGS)

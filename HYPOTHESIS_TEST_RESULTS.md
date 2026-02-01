@@ -164,6 +164,18 @@ Reference baseline for the hypotheses below: EW + RSI + EMA + MACD on a single e
 
 ---
 
+## Multi-Timeframe Hypotheses
+
+### Confirming daily signals with weekly trend (close vs weekly EMA) reduces false signals and improves alpha
+
+**Hypothesis:** Enabling multi-timeframe filter (keep BUY only when weekly close ≥ weekly EMA, SELL when weekly close ≤ weekly EMA) reduces false signals and improves alpha versus no filter. A weekly EMA period in the 4–12 range is effective.
+
+**Findings:** Grid-search sp500 2008–2012: baseline_no_mtf 18.31% alpha, 82.86% win rate, 35 trades; baseline_mtf_ema_8 18.72% alpha, 92.0% win rate, 25 trades; baseline_mtf_ema_12 18.10%, 95.65%, 23 trades; baseline_mtf_ema_4 16.10%, 82.14%, 28 trades. MTF with 8-week EMA yields highest alpha and best win rate with fewer trades; 4-week EMA underperformed.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on sp500, 2008–2012, EW+all indicators — enabling multi-timeframe with weekly EMA period 8 improves alpha and win rate versus no filter. Baseline updated to use_multi_timeframe true, multi_timeframe_weekly_ema_period 8.
+
+---
+
 ## Regime Detection Hypotheses
 
 ### ADX-based regime detection improves Elliott Wave alpha

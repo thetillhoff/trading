@@ -433,3 +433,129 @@ class TestFilterSignalsByQuality:
         signals = [self._make_signal(0), self._make_signal(3)]
         result = detector._filter_signals_by_quality(signals)
         assert len(result) == 2
+
+
+def _mtf_config(use_multi_timeframe: bool, multi_timeframe_weekly_ema_period: int = 8):
+    """SignalConfig with multi-timeframe on/off and optional weekly EMA period."""
+    return SignalConfig(
+        use_elliott_wave=False,
+        use_rsi=False,
+        use_ema=False,
+        use_macd=False,
+        use_multi_timeframe=use_multi_timeframe,
+        multi_timeframe_weekly_ema_period=multi_timeframe_weekly_ema_period,
+    )
+
+
+class TestMultiTimeframeFilter:
+    """Multi-timeframe filter: keep BUY when weekly close >= weekly EMA, SELL when weekly close <= weekly EMA."""
+
+    def test_disabled_passes_all_signals(self):
+        """When use_multi_timeframe=False, all signals are returned unchanged."""
+        config = _mtf_config(use_multi_timeframe=False)
+        detector = SignalDetector(config)
+        data = pd.Series(
+            100.0 + np.arange(60),
+            index=pd.date_range("2020-01-01", periods=60, freq="D"),
+        )
+        signals = [
+            TradingSignal(SignalType.BUY, data.index[10], 110.0, 0.8, reasoning="x"),
+            TradingSignal(SignalType.SELL, data.index[20], 120.0, 0.8, reasoning="y"),
+        ]
+        result = detector._filter_signals_by_multi_timeframe(signals, data)
+        assert len(result) == 2
+
+    def test_buy_kept_when_weekly_close_above_ema(self):
+        """BUY signal is kept when weekly close >= weekly EMA for that week."""
+        # Build data so one week has close well above its 8-week EMA (uptrend).
+        # 16 weeks of data, weekly close rising; EMA(8) will lag, so recent weeks: close >= EMA.
+        n = 16 * 7  # 16 weeks daily
+        np.random.seed(42)
+        daily = 100.0 + np.cumsum(np.random.randn(n) * 0.5) + np.linspace(0, 20, n)
+        data = pd.Series(daily, index=pd.date_range("2020-01-01", periods=n, freq="D"))
+        weekly = data.resample("W").last()
+        period = 8
+        weekly_ema = weekly.ewm(span=period, min_periods=period).mean()
+        # Last week: close should be above EMA (uptrend)
+        last_week_end = weekly.index[-1]
+        last_week_close = weekly.iloc[-1]
+        last_week_ema = weekly_ema.iloc[-1]
+        assert last_week_close >= last_week_ema, "test setup: last week close >= EMA"
+        # Signal on a day in the last week (BUY)
+        signal_ts = last_week_end - pd.Timedelta(days=2)
+        if signal_ts not in data.index:
+            signal_ts = data.index[data.index <= signal_ts][-1]
+        config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=period)
+        detector = SignalDetector(config)
+        signals = [TradingSignal(SignalType.BUY, signal_ts, float(data.loc[signal_ts]), 0.8, reasoning="x")]
+        result = detector._filter_signals_by_multi_timeframe(signals, data)
+        assert len(result) == 1
+        assert result[0].signal_type == SignalType.BUY
+
+    def test_buy_dropped_when_weekly_close_below_ema(self):
+        """BUY signal is dropped when weekly close < weekly EMA for that week."""
+        # Data where last week is in downtrend: close < EMA.
+        n = 16 * 7
+        np.random.seed(123)
+        daily = 120.0 - np.cumsum(np.random.randn(n) * 0.5) - np.linspace(0, 25, n)
+        data = pd.Series(daily, index=pd.date_range("2020-01-01", periods=n, freq="D"))
+        weekly = data.resample("W").last()
+        period = 8
+        weekly_ema = weekly.ewm(span=period, min_periods=period).mean()
+        last_week_close = weekly.iloc[-1]
+        last_week_ema = weekly_ema.iloc[-1]
+        if last_week_close >= last_week_ema:
+            # Force a week with close < EMA: use first week after warmup when price is falling
+            for i in range(period, len(weekly)):
+                if weekly.iloc[i] < weekly_ema.iloc[i]:
+                    last_week_end = weekly.index[i]
+                    break
+            else:
+                pytest.skip("could not get week with close < EMA")
+        else:
+            last_week_end = weekly.index[-1]
+        signal_ts = last_week_end - pd.Timedelta(days=1)
+        if signal_ts not in data.index:
+            signal_ts = data.index[data.index <= last_week_end][-1]
+        config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=period)
+        detector = SignalDetector(config)
+        signals = [TradingSignal(SignalType.BUY, signal_ts, float(data.loc[signal_ts]), 0.8, reasoning="x")]
+        result = detector._filter_signals_by_multi_timeframe(signals, data)
+        assert len(result) == 0
+
+    def test_sell_kept_when_weekly_close_below_ema(self):
+        """SELL signal is kept when weekly close <= weekly EMA for that week."""
+        n = 16 * 7
+        np.random.seed(456)
+        daily = 120.0 - np.cumsum(np.random.randn(n) * 0.3) - np.linspace(0, 30, n)
+        data = pd.Series(daily, index=pd.date_range("2020-01-01", periods=n, freq="D"))
+        weekly = data.resample("W").last()
+        period = 8
+        weekly_ema = weekly.ewm(span=period, min_periods=period).mean()
+        for i in range(period, len(weekly)):
+            if weekly.iloc[i] <= weekly_ema.iloc[i]:
+                week_end = weekly.index[i]
+                signal_ts = week_end - pd.Timedelta(days=1)
+                if signal_ts not in data.index:
+                    signal_ts = data.index[data.index <= week_end][-1]
+                config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=period)
+                detector = SignalDetector(config)
+                signals = [TradingSignal(SignalType.SELL, signal_ts, float(data.loc[signal_ts]), 0.8, reasoning="y")]
+                result = detector._filter_signals_by_multi_timeframe(signals, data)
+                assert len(result) == 1
+                assert result[0].signal_type == SignalType.SELL
+                return
+        pytest.skip("could not get week with close <= EMA for SELL")
+
+    def test_insufficient_weekly_data_returns_all_signals(self):
+        """When weekly bars are fewer than period, filter returns signals unchanged (no filter)."""
+        config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=8)
+        detector = SignalDetector(config)
+        # Only 3 weeks of daily data -> 3 weekly bars < 8
+        data = pd.Series(
+            [100.0, 101.0] * 10 + [100.0],
+            index=pd.date_range("2020-01-01", periods=21, freq="D"),
+        )
+        signals = [TradingSignal(SignalType.BUY, data.index[10], 101.0, 0.8, reasoning="x")]
+        result = detector._filter_signals_by_multi_timeframe(signals, data)
+        assert len(result) == 1

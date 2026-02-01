@@ -25,24 +25,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Evaluate baseline strategy on DJIA
-    python -m cli.evaluate --instrument djia
+    # Evaluate baseline strategy (default: sp500; run make download-baseline once)
+    python -m cli.evaluate
 
     # Evaluate on specific time range
     python -m cli.evaluate --instrument sp500 --start-date 2020-01-01 --end-date 2024-01-01
 
     # Use a preset configuration
-    python -m cli.evaluate --instrument djia --preset ema_only
+    python -m cli.evaluate --instrument sp500 --preset ema_only
 
     # Custom configuration
-    python -m cli.evaluate --instrument djia --use-ema --use-macd --rsi-period 7
+    python -m cli.evaluate --instrument sp500 --use-ema --use-macd --rsi-period 7
         """
     )
     
     parser.add_argument(
         "--instrument", "-i",
-        default="djia",
-        help="Instrument to evaluate (default: djia)",
+        default="sp500",
+        help="Instrument to evaluate (default: sp500; run make download-baseline once)",
     )
     parser.add_argument(
         "--start-date", "-s",

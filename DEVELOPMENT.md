@@ -75,6 +75,7 @@ Reporting (core/grid_test/) → Charts + CSV results
 - **core/signals/**: Generate trading signals from indicator values
 - **core/evaluation/**: Backtest strategies with realistic capital management. Trading costs configurable via `costs.trade_fee_pct` and `costs.trade_fee_absolute` (applied per side; result includes `total_trading_costs`). Optional `costs.trade_fee_min` and `costs.trade_fee_max` (absolute) clamp the fee per side to a minimum and maximum. Cash interest rate is configurable via `costs.interest_rate_pa` (default 0.02); reporter uses daily accrual and month-end payout so interest compounds; non-invested cash in strategy charts earns interest on its interest. **Non-invested cash**: The portfolio simulator does not apply interest; the reporter adds interest on cash for display in alpha_over_time and related charts. Non-invested cash earns only the configured interest rate (e.g. 2% p.a.), not instrument returns; displayed value uses balance/interest_account only (accrued not in account until month-end, so charts show monthly steps). **Market exposure**: The alpha-over-time figure includes a middle panel “Market exposure” (percentage of portfolio invested). **Multi-instrument**: When `config.instruments` has more than one symbol, walk-forward runs signal detection per instrument (each on its own history), merges and time-sorts signals, and simulates one portfolio with per-instrument prices for exits and PnL; buy-and-hold comparison uses the first instrument only. **Position size constraints**: `max_positions` (risk config) caps total open positions; `max_positions_per_instrument` (optional, default None) caps open positions **per instrument**. **Minimal position size**: `min_position_size` (risk config, optional) is an absolute value; when set, the simulator skips opening a position if the computed position capital would be below this minimum (relevant for multi-instrument; single-instrument still respects global `max_positions` only). **Position sizing**: `position_size_pct` (risk config) is the **maximum** fraction of portfolio per trade. Actual size = position_size_pct × quality_factor, with quality_factor ∈ [0, 1] from confirmations (and optionally confidence, volatility, risk/reward). Options: use_confidence_sizing (factor from confirmation score or count/3), use_confirmation_modulation (factor from confirmation_size_factors, normalized to 0–1), use_flexible_sizing, use_volatility_sizing. **Initial capital**: `initial_capital` (evaluation config, default 10000) sets starting portfolio capital for the backtest. **Feed history before timeframe**: When a timeframe (`start_date`/`end_date`) is specified in config, the evaluator requests data from `(start_date - lookback_days)` so that day-1 evaluation has full indicator history; if the cache does not have that far back, a warning is printed and evaluation continues with available data.
 - **core/asset_analysis/**: Instrument metadata (yfinance), returns/volatility/correlation analytics, and candidate scoring (liquidity, volatility, correlation diversity). Metadata is cached in `data/instrument_metadata.json`; on rerun we load from file unless `--refresh-metadata` is passed. For discovered assets, use `--all-assets`: by default all sources (sp500, nasdaq100, dax, djia) are combined; use `--source sp500` (or nasdaq100, dax, djia) to limit to one source. Asset lists are cached per source in `data/available_assets_<source>.csv`, metadata in `data/available_assets_metadata.json`; `--refresh-assets` forces re-fetch of the list(s). With `--all-assets --analyze`, metadata and OHLCV are always for all discovered tickers (cache-first: metadata in `data/available_assets_metadata.json`, OHLCV per ticker in `data/tickers/` via `download_ticker`). Use `--top N` to write only the top N rows to the candidate_ranking CSVs (default: all). Without `--all-assets`, `--analyze` uses `download_instrument` and `DataLoader.from_instrument` (INSTRUMENTS only). Run `make asset-analysis` (e.g. `make asset-analysis ARGS='--all-assets --fetch-metadata --analyze --top 100'`). Outputs: `data/asset_analysis/volatility_summary.csv`, `correlation_matrix.csv`, `candidate_ranking.csv`, `candidate_ranking_filtered.csv`. The candidate list can be used to pick instruments for `config.instruments` or to extend the instrument set.
+- **core/grid_test/**: Comparison and visualization for backtesting results. Reporter is split into: `reporter_utils.py` — constants (CASH_DAILY_RATE_2PA, MAX_LEGEND_INSTRUMENTS), helpers (_daily_rate_from_pa, _is_new_month), trades_to_dataframe; `reporter_analysis.py` — AlphaOverTimeSeries dataclass, compute_alpha_over_time_series; `reporter_charts.py` — ReporterChartsMixin with all generate_* and _plot_* chart methods; `reporter_base.py` — ComparisonReporter(ReporterChartsMixin) with __init__, paths, print_*, save_*, generate_analysis_report; `reporter.py` — re-exports for backward compatibility (import from here: ComparisonReporter, trades_to_dataframe, compute_alpha_over_time_series, etc.). Also: `analysis.py` (load results CSVs, analyze_results_dir), `grid_search.py` (generate_grid_configs).
 - **core/shared/**: Centralized defaults and shared types (single source of truth)
 - **cli/**: Command-line interface (all operations via `make`)
 
@@ -82,10 +83,22 @@ Reporting (core/grid_test/) → Charts + CSV results
 
 **Add New Indicator:**
 
-1. Create class in `core/indicators/` implementing `Indicator` interface
+1. Create class in `core/indicators/` implementing `Indicator` interface (see `core/indicators/base.py`)
 2. Add parameters to `core/shared/defaults.py`
 3. Update `TechnicalIndicators.calculate_all()` to include new indicator
-4. Add CLI arguments in `cli/evaluate.py`
+4. Add CLI arguments in `cli/evaluate.py` and wire into `SignalConfig` / config loader if used for signals
+
+**Add New Signal Source (e.g. another detector):**
+
+1. Implement detection in `core/signals/` or `core/indicators/` (e.g. Elliott Wave lives in indicators, detector orchestrates)
+2. In `SignalDetector`: add a `_get_*_signals`-style method and call it from `detect_signals` / `detect_signals_with_indicators` when the config enables it. Reuse `_filter_signals_by_quality`, `_deduplicate_signals`, and target calculation.
+3. Add config flags and params to `StrategyConfig` and `SignalConfig`; extend `_signal_config_from_strategy()` in `core/evaluation/walk_forward.py` so new strategies get the new options without duplicating config construction.
+
+**Add New Technical Indicator Rule (RSI/EMA/MACD-style):**
+
+1. In `core/signals/rules.py`: implement a class with `evaluate(row, prev_row, config) -> (buy_reasons: List[str], sell_reasons: List[str])` (satisfies `SignalRule` protocol).
+2. Register it in `get_technical_rules(config)` so it runs when the corresponding config flag is set (e.g. `use_xyz`).
+3. Add config fields to `StrategyConfig` / `SignalConfig` and wire from config loader if needed.
 
 **Add New Strategy Preset:**
 
@@ -95,10 +108,16 @@ Reporting (core/grid_test/) → Charts + CSV results
 
 **Add New Performance Metric:**
 
-1. Extend `SimulationResult` dataclass in `core/evaluation/portfolio.py`
-2. Calculate metric in `PortfolioSimulator.simulate()`
-3. Add to reporting in `core/grid_test/reporter.py`
+1. Extend `SimulationResult` in `core/evaluation/portfolio_types.py`
+2. Calculate metric in `PortfolioSimulator.simulate()` in `core/evaluation/portfolio.py`
+3. Add to reporting in `core/grid_test/reporter_base.py` or `reporter_charts.py` as appropriate
+
+**Extensibility and type modules (hypotheses / new strategies without rewriting):**
+
+- **Types are split out** so new evaluators or strategies can reuse them: `core/evaluation/portfolio_types.py` (Position, SimulationResult, etc.), `core/evaluation/walk_forward_types.py` (WalkForwardResult, EvaluationSummary, etc.), `core/indicators/elliott_types.py` (Wave, WaveType, WaveLabel).
+- **Single place for detector/simulator config:** `_signal_config_from_strategy(config)` and `_portfolio_simulator_from_config(config)` in `walk_forward.py` build `SignalConfig` and `PortfolioSimulator` from `StrategyConfig`; single- and multi-instrument eval both use these, so new config options only need to be added once.
+- **Hypotheses:** Add new YAML configs (or grid-generated configs), run `make grid-search` or `make hypothesis-tests`; no code change needed for new parameter hypotheses. For new signal sources or metrics, follow the extension points above.
 
 ### Baseline trades snapshot test
 
-The test `tests/test_evaluation/test_baseline_trades_snapshot.py` checks that baseline evaluation on a short window (2012) produces the same trades as a stored snapshot. It requires djia data for 2012 and the golden file `tests/snapshots/baseline_trades_short.csv`. To create or refresh the snapshot after downloading data: `make baseline-snapshot-generate`. Create the snapshot directory first: `mkdir -p tests/snapshots`.
+The test `tests/test_evaluation/test_baseline_trades_snapshot.py` checks that baseline evaluation on a short window (2012) produces the same trades as a stored snapshot. It requires data for the instrument in `configs/baseline.yaml` (e.g. sp500) and the golden file `tests/snapshots/baseline_trades_short.csv`. To create or refresh the snapshot: `make download-baseline` then `make baseline-snapshot-generate`. Create the snapshot directory first: `mkdir -p tests/snapshots`. If you change the baseline instrument, regenerate the snapshot so the test passes.
