@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union, Dict
+from typing import Optional, Tuple, Union, Dict, Any
 
 from ..shared.defaults import (
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
@@ -306,6 +306,7 @@ class TechnicalIndicators:
         data: Union[pd.Series, pd.DataFrame],
         timings: Optional[Dict[str, float]] = None,
         max_workers: Optional[int] = None,
+        config: Optional[Any] = None
     ) -> pd.DataFrame:
         """
         Calculate all indicators and return as DataFrame.
@@ -341,29 +342,48 @@ class TechnicalIndicators:
             else (os.cpu_count() or 1)
         )
 
+        # Check if ADX is needed (only for regime detection)
+        use_regime_detection = getattr(config, 'use_regime_detection', False) if config else False
+        
+        # Check which technical indicators are needed (based on indicator_weights)
+        use_rsi = getattr(config, 'use_rsi', False) if config else False
+        use_ema = getattr(config, 'use_ema', False) if config else False
+        use_macd = getattr(config, 'use_macd', False) if config else False
+        
         if workers <= 1:
             # Sequential (e.g. testing or single-threaded)
-            for key, cols, elapsed in [
-                self._compute_rsi_block(prices),
-                self._compute_ema_block(prices),
-                self._compute_macd_block(prices),
-                self._compute_adx_block(data),
-                self._compute_volatility_block(prices),
-                self._compute_atr_block(data, prices),
-            ]:
+            blocks = []
+            if use_rsi:
+                blocks.append(self._compute_rsi_block(prices))
+            if use_ema:
+                blocks.append(self._compute_ema_block(prices))
+            if use_macd:
+                blocks.append(self._compute_macd_block(prices))
+            # Always compute volatility & ATR for risk management
+            blocks.append(self._compute_volatility_block(prices))
+            blocks.append(self._compute_atr_block(data, prices))
+            if use_regime_detection:
+                blocks.append(self._compute_adx_block(data))
+            
+            for key, cols, elapsed in blocks:
                 _acc(key, elapsed)
                 for k, v in cols.items():
                     df[k] = v
         else:
             with ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = [
-                    executor.submit(self._compute_rsi_block, prices),
-                    executor.submit(self._compute_ema_block, prices),
-                    executor.submit(self._compute_macd_block, prices),
-                    executor.submit(self._compute_adx_block, data),
-                    executor.submit(self._compute_volatility_block, prices),
-                    executor.submit(self._compute_atr_block, data, prices),
-                ]
+                futures = []
+                if use_rsi:
+                    futures.append(executor.submit(self._compute_rsi_block, prices))
+                if use_ema:
+                    futures.append(executor.submit(self._compute_ema_block, prices))
+                if use_macd:
+                    futures.append(executor.submit(self._compute_macd_block, prices))
+                # Always compute volatility & ATR for risk management
+                futures.append(executor.submit(self._compute_volatility_block, prices))
+                futures.append(executor.submit(self._compute_atr_block, data, prices))
+                if use_regime_detection:
+                    futures.append(executor.submit(self._compute_adx_block, data))
+                
                 for future in as_completed(futures):
                     key, cols, elapsed = future.result()
                     _acc(key, elapsed)

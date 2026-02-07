@@ -290,6 +290,29 @@ def test_performance_timings_chart_returns_empty_when_no_timings():
         assert path == ""
 
 
+def test_grid_performance_timings_chart_returns_path_when_timings_present():
+    """generate_grid_performance_timings_chart writes chart and returns path when timings dict provided."""
+    timings = {
+        "data_prep": 1.2,
+        "signal_detection": 45.0,
+        "data_load": 3.1,
+        "portfolio_simulation": 2.0,
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        reporter = ComparisonReporter(output_dir=tmp)
+        path = reporter.generate_grid_performance_timings_chart(timings, filename="grid_perf.png")
+        assert path
+        assert "grid_perf.png" in path
+
+
+def test_grid_performance_timings_chart_returns_empty_when_no_timings():
+    """generate_grid_performance_timings_chart returns empty when timings dict is empty."""
+    with tempfile.TemporaryDirectory() as tmp:
+        reporter = ComparisonReporter(output_dir=tmp)
+        path = reporter.generate_grid_performance_timings_chart({})
+        assert path == ""
+
+
 def test_alpha_over_time_zero_trades_cash_earns_interest_not_bh():
     """With zero trades, Cash only and Strategy should earn ~2% p.a. (interest), not track B&H."""
     # One year of daily dates (trading days)

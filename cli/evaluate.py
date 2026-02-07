@@ -17,6 +17,21 @@ from core.evaluation.walk_forward import WalkForwardEvaluator
 from core.evaluation.portfolio import PortfolioSimulator
 from core.grid_test.reporter import ComparisonReporter
 from core.shared.types import SignalType
+from core.orchestration.contract import (
+    TRADES_CSV,
+    RESULTS_CSV,
+    INDICATORS_CSV,
+    CHART_ALPHA_OVER_TIME,
+    CHART_VALUE_GAIN_PER_INSTRUMENT,
+    CHART_SCATTER_PNL_DURATION,
+    CHART_SCATTER_CONFIDENCE_RISK,
+    CHART_GAIN_PER_INSTRUMENT,
+    CHART_TRADES_PER_INSTRUMENT,
+    CHART_INDICATOR_BEST_WORST,
+    CHART_PERFORMANCE_TIMINGS,
+    CHART_COMPARISON,
+    CONFIG_TXT,
+)
 
 
 def main():
@@ -86,6 +101,12 @@ Examples:
         "--output-dir",
         type=str,
         help="Output directory for results (default: current directory)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of parallel workers for multi-instrument evaluation (default: CPU-based)",
     )
     
     # Indicator enable/disable
@@ -235,16 +256,52 @@ Examples:
         step_days=config.step_days,
     )
     
+    used_pipeline = False
     if config_based_execution:
-        # Use config's instruments and dates (multi-instrument support)
-        result = evaluator.evaluate_multi_instrument(config, verbose=True)
-        # For charts, load data from first instrument
-        data = DataLoader.from_instrument(
-            config.instruments[0],
-            start_date=config.start_date,
-            end_date=config.end_date,
-            column=config.column
+        # Pipeline: Data -> Indicators -> Signals -> Simulation -> Outputs (path-based, same as grid)
+        import tempfile
+        from pathlib import Path
+        from core.orchestration.orchestrator import (
+            run_tasks,
+            build_data_task_graph,
+            build_single_eval_task_graph,
         )
+
+        if args.config:
+            config_path = Path(args.config)
+            try:
+                rel = config_path.relative_to("configs")
+                output_subdir = rel.parent / rel.stem
+            except ValueError:
+                output_subdir = Path(config.name)
+            output_dir = Path("results") / output_subdir
+        else:
+            output_dir = Path("results") / config.name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        workspace_root = Path(tempfile.mkdtemp(prefix="eval_"))
+        try:
+            print("  Pipeline: Data -> Indicators -> Signals -> Simulation -> Outputs")
+            
+            # Build and execute data task
+            data_graph = build_data_task_graph(workspace_root, config, min_history_days=100)
+            run_tasks(data_graph, verbose=True, cache_enabled=True)
+            
+            # Build and execute evaluation tasks
+            eval_graph = build_single_eval_task_graph(workspace_root, output_dir, config)
+            run_tasks(eval_graph, verbose=True, cache_enabled=True)
+            
+            from core.orchestration.contract import config_result_path
+            result_path = config_result_path(workspace_root, config.name)
+            with open(result_path, "rb") as f:
+                import pickle
+                result = pickle.load(f)
+        finally:
+            import shutil
+            if workspace_root.exists():
+                shutil.rmtree(workspace_root, ignore_errors=True)
+        instruments_used = result.instruments_used if result.instruments_used is not None else config.instruments
+        data = None
+        used_pipeline = True
     else:
         # Old flow: Load data from CLI args
         try:
@@ -268,6 +325,7 @@ Examples:
             end_date=pd.to_datetime(args.end_date) if args.end_date else None,
             verbose=True,
         )
+        instruments_used = [args.instrument]
     
     # Print results
     print("\n" + "=" * 80)
@@ -280,8 +338,12 @@ Examples:
     print(f"Total Return: {result.simulation.total_return_pct:.2f}%")
     print(f"Alpha: {getattr(result, 'active_alpha', result.outperformance):.2f}%")
     print(f"Expectancy: {result.simulation.expectancy_pct:.2f}%")
-    
-    # Create output directory and timestamp
+
+    if used_pipeline:
+        print(f"\nOutputs written to {output_dir} (trades.csv, results.csv, indicators.csv, charts)")
+        return 0
+
+    # Legacy path: create output directory and write files/charts
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
@@ -306,26 +368,29 @@ Examples:
     
     # Always generate charts and CSV
     # Save indicators CSV (always generated; includes quality_factor from result when available)
-    indicators_csv = evaluator.save_indicators_csv(output_dir, f"indicators_{timestamp}", config=config, result=result)
+    indicators_csv = evaluator.save_indicators_csv(
+        output_dir, "indicators", config=config, result=result, filename=INDICATORS_CSV
+    )
     if indicators_csv:
         print(f"Indicators CSV saved: {indicators_csv}")
 
     total_trades = result.summary.total_trades
 
-    # Save trades CSV with ALL trades
-    trades_csv = reporter.save_trades_csv(result, filename=f"trades_full_{timestamp}.csv")
+    # Save trades and results CSVs (canonical names)
+    trades_csv = reporter.save_trades_csv(result, filename=TRADES_CSV)
     if trades_csv:
         print(f"\nTrades CSV saved: {trades_csv} (all {total_trades} trades)")
-    
+    reporter.save_results_csv([result], filename=RESULTS_CSV)
+
     # Save configuration summary to text file
-    config_path = output_dir / f"config_{timestamp}.txt"
+    config_path = output_dir / CONFIG_TXT
     with open(config_path, 'w') as f:
             f.write(f"CONFIGURATION SUMMARY\n")
             f.write(f"{'='*80}\n")
             f.write(f"Timestamp: {timestamp}\n")
             f.write(f"Strategy: {config.name}\n")
             if config_based_execution:
-                f.write(f"Instruments: {', '.join(config.instruments)}\n")
+                f.write(f"Instruments: {', '.join(instruments_used)}\n")
                 f.write(f"Period: {config.start_date} to {config.end_date}\n")
             else:
                 f.write(f"Instrument: {args.instrument}\n")
@@ -364,16 +429,18 @@ Examples:
             f.write(f"\n")
             f.write(f"FILES GENERATED\n")
             f.write(f"{'-'*80}\n")
-            f.write(f"Trades CSV: trades_full_{timestamp}.csv\n")
-            f.write(f"Alpha Over Time: alpha_over_time_{timestamp}.png\n")
-            f.write(f"Value-gain % per instrument over time: value_gain_per_instrument_over_time_{timestamp}.png\n")
-            f.write(f"Scatter P&L%% vs Duration: scatter_pnl_pct_vs_duration_{timestamp}.png\n")
-            f.write(f"Scatter Confidence/Risk vs P&L: scatter_confidence_risk_vs_pnl_{timestamp}.png\n")
-            f.write(f"Gain per Instrument: gain_per_instrument_{timestamp}.png\n")
-            f.write(f"Trades per Instrument: trades_per_instrument_{timestamp}.png\n")
-            f.write(f"Indicator Best/Worst 20%%: indicator_best_worst_{timestamp}.png\n")
-            f.write(f"Performance timings: performance_timings_{timestamp}.png\n")
-            f.write(f"Indicators CSV: indicators_{timestamp}_{timestamp}.csv\n")
+            f.write(f"Trades CSV: {TRADES_CSV}\n")
+            f.write(f"Results CSV: {RESULTS_CSV}\n")
+            f.write(f"Indicators CSV: {INDICATORS_CSV}\n")
+            f.write(f"Alpha Over Time: {CHART_ALPHA_OVER_TIME}\n")
+            f.write(f"Value-gain per instrument: {CHART_VALUE_GAIN_PER_INSTRUMENT}\n")
+            f.write(f"Scatter P&L%% vs Duration: {CHART_SCATTER_PNL_DURATION}\n")
+            f.write(f"Scatter Confidence/Risk vs P&L: {CHART_SCATTER_CONFIDENCE_RISK}\n")
+            f.write(f"Gain per Instrument: {CHART_GAIN_PER_INSTRUMENT}\n")
+            f.write(f"Trades per Instrument: {CHART_TRADES_PER_INSTRUMENT}\n")
+            f.write(f"Indicator Best/Worst: {CHART_INDICATOR_BEST_WORST}\n")
+            f.write(f"Performance timings: {CHART_PERFORMANCE_TIMINGS}\n")
+            f.write(f"Comparison: {CHART_COMPARISON}\n")
     print(f"Config summary saved: {config_path}")
     
     # Ensure price data is a Series for charts
@@ -400,7 +467,7 @@ Examples:
             pass
     # Per-instrument price series for gain_per_instrument (Strategy vs B&H)
     price_data_by_instrument = {}
-    instruments_for_gain = config.instruments if config_based_execution else [args.instrument]
+    instruments_for_gain = instruments_used if config_based_execution else [args.instrument]
     col = config.column if config_based_execution else (args.column or 'Close')
     for inst in instruments_for_gain:
         try:
@@ -411,41 +478,41 @@ Examples:
                 price_data_by_instrument[inst] = s['Close'] if 'Close' in s.columns else s.iloc[:, 0]
         except Exception:
             pass
-    # Generate alpha over time chart (cash, B&H per instrument, strategy)
+    # Generate charts (canonical filenames)
     alpha_path = reporter.generate_alpha_over_time(
         result,
         price_series,
         price_data_by_instrument=price_data_by_instrument if price_data_by_instrument else None,
-        filename=f"alpha_over_time_{timestamp}.png",
+        filename=CHART_ALPHA_OVER_TIME,
     )
     value_gain_per_inst_path = reporter.generate_value_gain_and_benchmarks(
         result,
         price_data=price_series,
         benchmark_series=benchmark_series,
         price_data_by_instrument=price_data_by_instrument if price_data_by_instrument else None,
-        filename=f"value_gain_per_instrument_over_time_{timestamp}.png",
+        filename=CHART_VALUE_GAIN_PER_INSTRUMENT,
     )
     scatter_duration_path = reporter.generate_pnl_vs_duration_scatter(
-        result, filename=f"scatter_pnl_pct_vs_duration_{timestamp}.png",
+        result, filename=CHART_SCATTER_PNL_DURATION,
     )
     scatter_conf_path = reporter.generate_confidence_risk_vs_pnl_scatter(
-        result, filename=f"scatter_confidence_risk_vs_pnl_{timestamp}.png",
+        result, filename=CHART_SCATTER_CONFIDENCE_RISK,
     )
     gain_inst_path = reporter.generate_gain_per_instrument(
         result,
-        filename=f"gain_per_instrument_{timestamp}.png",
+        filename=CHART_GAIN_PER_INSTRUMENT,
         price_data_by_instrument=price_data_by_instrument if price_data_by_instrument else None,
     )
     trades_inst_path = reporter.generate_trades_per_instrument(
-        result, filename=f"trades_per_instrument_{timestamp}.png",
+        result, filename=CHART_TRADES_PER_INSTRUMENT,
     )
     indicator_bw_path = reporter.generate_indicator_best_worst_overview(
-        result, filename=f"indicator_best_worst_{timestamp}.png",
+        result, filename=CHART_INDICATOR_BEST_WORST,
     )
     perf_timings_path = ""
     if getattr(result, "performance_timings", None):
         perf_timings_path = reporter.generate_performance_timings_chart(
-            result, filename=f"performance_timings_{timestamp}.png",
+            result, filename=CHART_PERFORMANCE_TIMINGS,
         )
     print(f"\nCharts saved to {output_dir}")
     if alpha_path:

@@ -1,5 +1,8 @@
 # Trading Strategy Roadmap
 
+w10 should be the same as before vectorization
+
+
 ## Time ranges / events to analyze
 
 covid_crash: "2019-01-01 - 2021-01-01"
@@ -17,17 +20,32 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 
 ## Next Steps (Priority Order)
 
-### High Priority
-- **Small-jobs parallelism (evaluate + grid-search):** Today evaluate runs one multi-instrument walk-forward (parallel signal detection only within each eval date); grid-search runs one process per config. Unify on a single primitive: one task = produce all signals for (config, instrument) over the full walk-forward (same eval_dates for every instrument); no portfolio sim in the job. Aggregate: merge signal lists by time, run one portfolio sim per config. Evaluate: one config, N instruments → N parallel jobs, then merge + one sim. Grid-search: M×N jobs (config×instrument), group signals by config, merge + sim once per config. Period is in the config; walk-forward eval dates stay sequential inside each job.
+### High Priority – Fine-Tuning New Champion (w10)
+
+Following breakthrough: w10 with optimized weights achieves 1949.5% alpha (1830 trades, 60.2% win, 2008-2012 DJIA). Key insight: MTF weight is THE dominant factor.
+
+- **Push MTF weight higher:** Test mtf weights: 0.30, 0.35, 0.40 with compensating adjustments to rsi/ema/macd. Current best: mtf=0.25, rsi=0.60. Explore if even higher MTF improves further.
+
+- **Consider pure RSI+MTF strategy:** Since EMA/MACD contribution is minimal (0.075 each in w10), test indicator_weights with only rsi+mtf (e.g., rsi=0.75, mtf=0.25 or rsi=0.70, mtf=0.30). Simplify if possible.
+
+- **Position sizing sweep on w10 base:** Test position sizes: 5%, 10%, 15%, 20%. Current: 10%. Monitor exposure (keep < 90%). Find optimal risk/reward.
+
+- **Fine-tune base parameters on w10:** Elliott Wave confidence (0.60, 0.65, 0.70), risk/reward (2.0, 2.5, 3.0), weekly EMA period (6, 8, 10 weeks).
+
+- **Robustness validation on w10:** Walk-forward on 2012-2016, 2016-2020, 2020-2024. Verify strategy holds across different market regimes. Out-of-sample validation.
 
 - **restructure signals configuration**: Use a single configuration for indicators. If an indicator should be used, it has to be configured; if it's missing, it's not used. A minimal configuration contains at least a weight for the indicator and the necessary parameters. Filtering is via weighted score or min_confirmations/min_certainty.
+
   - This might affect the structure of this repo. From my understanding, the elliot wave config is used to generate signals. These are then filtered by the signal/indicator configuration. And then, based on those results, and other criteria, the position size is calculated. Only then, the trade is executed. Please create a flow diagram of the current process, vs this one. Note down pros and cons if there are differences.
 
 - **asset analysis pt 2:**
+
   - Backtest scoring: run per-instrument backtest (e.g. baseline single-instrument), rank by return/Sharpe; optional flag (e.g. --backtest-score).
   - improve candidate filtering: add description of asset/company. fill gaps or remove those candidates. add some trading data like OHLCV etc, also export to same csv.
 
-- **incorporate more data into algorithm:** Currently, only daily close data is used. Add more data like open, high, low, volume, etc. that's daily, and maybe even intraday data.
+- **incorporate more data into algorithm:** Currently, only daily close data is used. Add more data like open, high, low, volume, etc. that's daily, and maybe even intraday / hourly data. Prepare for even more detailed data, like hourly & minutely & per second. It should be mostly used for active trades, not always for everything.
+
+- **gpu computation:** Use GPU computation for the indicator calculations. This should speed up the computation significantly.
 
 - **implement IBKR API**: Implement the IBKR API to get real-time data and execute trades. Sandbox first.
 
@@ -48,7 +66,9 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 - **Try around with indicator vs filters:** Some indicators could be used as filters, or as confirmation. And some filters could be used as indicators.
 
 - **Independent review with fresh AI agent:**
+
   - **Test Coverage (61% overall):**
+
     - **Low Coverage (<50%):**
       - `core/data/download.py` (27%) — data downloading logic needs more tests
       - `core/data/scraper.py` (45%) — instrument scraping needs tests
@@ -65,6 +85,7 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
       - Structured logging for analysis
       - Progress tracking without cluttering stdout
   - **Strategy & Feature Suggestions:**
+
     - **Multi-Timeframe Analysis as additional indicator:** Detect patterns on daily, confirm on weekly (mentioned in roadmap; high value for reducing false signals)
     - **Volume Confirmation:** Add volume indicators (OBV, VWMA) as optional confirmations. Many false breakouts happen on low volume.
     - **Adaptive Parameters:** Consider regime-aware parameter adjustment (e.g., wider stops in high volatility, tighter in low volatility)
@@ -74,26 +95,30 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
     - **Partial Exits:** Support scaling out of positions (e.g., take 50% at target, leave 50% with trailing stop)
 
   - **Testing Improvements:**
+
     - Add integration tests for end-to-end workflows (config → signals → evaluation → report)
     - Mock external APIs (yfinance) for deterministic tests
     - Property-based testing for financial calculations (use `hypothesis` library)
     - Regression tests for chart generation (image comparison or data structure validation)
     - Performance regression tests (ensure grid searches don't slow down over time)
-  
+
   - **Code Simplifications:**
+
     - `walk_forward.py` has some duplicate logic between single-instrument and multi-instrument paths; consider unified flow
     - Config loading has fallback chains (CLI → YAML → defaults); consolidate into single precedence function
     - Some indicator confirmation logic is duplicated across buy/sell paths; extract to shared function
-  
+
   - **Security & Robustness:**
+
     - Add input validation for CLI arguments (e.g., date format, numeric ranges)
     - Handle network failures gracefully in yfinance downloads (retry logic with exponential backoff)
     - Add file size limits when reading CSVs to prevent OOM on corrupted files
-  
+
   - **Git & Workflow:**
+
     - Consider adding:
       - Pre-commit hooks for linting (black, flake8, mypy)
-  
+
   - **Next Steps from This Review:**
     1. Split reporter.py into smaller modules (maintainability)
     2. Add logging framework (replaces prints)
@@ -193,7 +218,15 @@ Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
 - Cross-validation for parameter optimization
 - Quick backtest mode (faster with reduced accuracy for rapid iteration)
 - Grid search resume capability (save progress, skip completed configs)
-- Function refactoring (break down 200-300 line functions for maintainability)
+
+---
+
+When Parallel Computation Optimization is implemented, the following features could be implemented:
+
+- dead letter queue, for failed jobs, where the intermediate results are not deleted for later inspection and retries.
+- Notifications to mobile / via email, when a grid search is finished, and/or a trade is executed.
+- Schedule multiple grid-searches at once, on the same hardware/cluster to validate multiple hypotheses at once.
+- "AI" generated grid-search configs, based on previous results to narrow down the optimal parameters, and/or triggered via prompt from phone etc.
 
 ---
 

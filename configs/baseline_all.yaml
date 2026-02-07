@@ -1,5 +1,5 @@
-name: baseline
-description: Current best config.
+name: baseline-all-instruments
+description: Current best multi-instrument baseline
 
 indicators:
   elliott_wave:
@@ -20,15 +20,13 @@ indicators:
 
 risk:
   risk_reward: 2.5 # target/stop ratio (e.g. 2.5:1)
-  position_size_pct: 0.1 # fraction of portfolio per new trade (0–1); optimal from position size sweep
-  # max_positions: 10 # optional; max open positions at once
+  position_size_pct: 0.1 # 10% position size; optimal from position size sweep
   max_positions_per_instrument: 2 # optional; max open positions per instrument
   min_position_size: 20 # skip trades smaller than this (USD)
   use_confidence_sizing: true
 
 signals:
-  signal_types: all # all | buy_only | sell_only
-  # min_confirmations: 2 # optional: require at least N indicator confirmations
+  signal_types: all
   min_certainty: 0.7 # from MTF grid search: 0.7 optimal with soft MTF
   use_trend_filter: false # gate entries by trend (rejected in tests)
   use_multi_timeframe: true # confirm daily signals with weekly trend; MTF as soft indicator
@@ -58,8 +56,5 @@ evaluation:
   initial_capital: 10000 # starting portfolio capital (default 10k)
 
 data:
-  instruments:
-    - sp500 # S&P 500 (^GSPC); run "make download-baseline" once before make evaluate
   start_date: '2008-01-01'
-  # end_date: '2020-01-01'
   end_date: '2012-01-01'

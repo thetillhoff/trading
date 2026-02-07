@@ -1222,19 +1222,31 @@ class ReporterChartsMixin:
         result: WalkForwardResult,
         filename: Optional[str] = None,
     ) -> str:
-        """Bar chart of computation time by phase and per-indicator (seconds)."""
+        """Bar chart of computation time by phase, signal-detection breakdown, and per-indicator (seconds)."""
         timings = getattr(result, 'performance_timings', None) if result else None
         if not timings:
             return ""
-        phase_keys = ["data_load", "signal_detection", "portfolio_simulation"]
+        # Pipeline order: data_prep, data_load, signal_detection, portfolio_simulation
+        phase_keys = ["data_prep", "data_load", "signal_detection", "portfolio_simulation"]
         phases = [(k, timings[k]) for k in phase_keys if k in timings]
+        # Signal detection breakdown (what eats time inside signal_detection)
+        breakdown_keys = [
+            "signal_detection_elliott_wave",
+            "signal_detection_inverted_ew",
+            "signal_detection_technical_signals",
+            "signal_detection_target_calculation",
+            "signal_detection_mtf",
+            "signal_detection_filter",
+        ]
+        breakdown_items = [(k.replace("signal_detection_", ""), timings[k]) for k in breakdown_keys if k in timings]
         indicator_items = [(k.replace("indicator_", ""), timings[k]) for k in sorted(timings) if k.startswith("indicator_")]
         n_phase = len(phases)
+        n_breakdown = len(breakdown_items)
         n_ind = len(indicator_items)
-        if n_phase == 0 and n_ind == 0:
+        if n_phase == 0 and n_breakdown == 0 and n_ind == 0:
             return ""
-        n_rows = (1 if n_phase else 0) + (1 if n_ind else 0)
-        fig, axes = plt.subplots(n_rows, 1, figsize=(max(8, (n_phase + n_ind) * 0.8), 4 * n_rows))
+        n_rows = (1 if n_phase else 0) + (1 if n_breakdown else 0) + (1 if n_ind else 0)
+        fig, axes = plt.subplots(n_rows, 1, figsize=(max(8, (n_phase + n_breakdown + n_ind) * 0.8), 4 * n_rows))
         axes = np.atleast_1d(axes)
         ax_idx = 0
         if phases:
@@ -1248,6 +1260,18 @@ class ReporterChartsMixin:
             ax.set_xticklabels(labels, rotation=25, ha="right")
             ax.set_ylabel("Time (s)")
             ax.set_title("Computation time by phase")
+            ax.grid(True, alpha=0.3, axis="y")
+        if breakdown_items:
+            ax = axes[ax_idx]
+            ax_idx += 1
+            labels = [p[0].replace("_", " ") for p in breakdown_items]
+            vals = [p[1] for p in breakdown_items]
+            x = np.arange(len(labels))
+            ax.bar(x, vals, color="coral", alpha=0.8)
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels, rotation=25, ha="right")
+            ax.set_ylabel("Time (s)")
+            ax.set_title("Signal detection breakdown (cumulative)")
             ax.grid(True, alpha=0.3, axis="y")
         if indicator_items:
             ax = axes[ax_idx]
@@ -1264,6 +1288,38 @@ class ReporterChartsMixin:
         plt.tight_layout()
         if filename is None:
             filename = f"performance_timings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        output_path = self.output_dir / filename
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close()
+        return str(output_path)
+
+    def generate_grid_performance_timings_chart(
+        self,
+        timings: Dict[str, float],
+        filename: Optional[str] = None,
+        title: str = "Grid search – total time by phase",
+    ) -> str:
+        """Bar chart of total computation time by phase (for grid-search aggregate)."""
+        if not timings:
+            return ""
+        phase_keys = ["data_prep", "data_load", "signal_detection", "portfolio_simulation"]
+        phases = [(k, timings[k]) for k in phase_keys if k in timings]
+        if not phases:
+            return ""
+        fig, ax = plt.subplots(1, 1, figsize=(max(8, len(phases) * 1.2), 4))
+        labels = [p[0].replace("_", " ") for p in phases]
+        vals = [p[1] for p in phases]
+        x = np.arange(len(labels))
+        ax.bar(x, vals, color="steelblue", alpha=0.8)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=25, ha="right")
+        ax.set_ylabel("Time (s)")
+        ax.set_title("Total computation time by phase")
+        ax.grid(True, alpha=0.3, axis="y")
+        fig.suptitle(title, fontsize=11, fontweight="bold")
+        plt.tight_layout()
+        if filename is None:
+            filename = f"grid_performance_timings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         output_path = self.output_dir / filename
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close()
@@ -2030,11 +2086,13 @@ class ReporterChartsMixin:
         
         # Calculate buy-and-hold returns from actual price data over time
         # We need to load price data to calculate the actual buy-and-hold curve
-        # Use the first result's config to get instrument and load data
+        # Use the first result's instruments actually used (excludes skipped)
         try:
             from ..data.loader import DataLoader
+            from .reporter_utils import get_instruments_used
             config = first_result.config
-            instrument = config.instruments[0] if config.instruments else "djia"
+            instruments = get_instruments_used(first_result)
+            instrument = instruments[0] if instruments else "djia"
             
             loader = DataLoader.from_scraper(instrument)
             df = loader.load(
@@ -2148,6 +2206,7 @@ class ReporterChartsMixin:
         Generate chart showing performance breakdown by instrument.
         
         Only generated if results contain multiple instruments.
+        Shows top/bottom performers when there are many instruments.
         
         Args:
             results: List of walk-forward results
@@ -2159,65 +2218,76 @@ class ReporterChartsMixin:
         if not results:
             return ""
         
-        # Collect instruments from all results
+        # Collect instruments actually used from all results (excludes skipped)
+        from .reporter_utils import get_instruments_used
         instruments = set()
         for result in results:
-            if hasattr(result.config, 'instruments') and result.config.instruments:
-                instruments.update(result.config.instruments)
+            instruments.update(get_instruments_used(result))
         
         # Only generate if we have multiple instruments
         if len(instruments) <= 1:
             return ""
         
-        # Group results by instrument
-        by_instrument = {}
+        # Extract per-instrument alpha from trade data
+        instrument_alphas_list = {}
         for result in results:
-            if hasattr(result.config, 'instruments') and result.config.instruments:
-                for instrument in result.config.instruments:
-                    if instrument not in by_instrument:
-                        by_instrument[instrument] = []
-                    by_instrument[instrument].append(result)
+            # Get per-instrument performance from trades
+            if hasattr(result, 'trades') and result.trades:
+                for trade in result.trades:
+                    inst = trade.get('instrument') or trade.get('ticker')
+                    if inst:
+                        pnl_pct = trade.get('pnl_pct', 0.0)
+                        if inst not in instrument_alphas_list:
+                            instrument_alphas_list[inst] = []
+                        instrument_alphas_list[inst].append(pnl_pct)
         
-        # Calculate average alpha per instrument
+        # Calculate average alpha per instrument from trade data
         instrument_alphas = {}
-        instrument_counts = {}
-        for instrument, inst_results in by_instrument.items():
-            alphas = [getattr(r, 'active_alpha', r.outperformance) for r in inst_results]
-            instrument_alphas[instrument] = np.mean(alphas) if alphas else 0.0
-            instrument_counts[instrument] = len(inst_results)
+        for inst, pnls in instrument_alphas_list.items():
+            if pnls:
+                instrument_alphas[inst] = np.mean(pnls)
         
-        # Create chart
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        if not instrument_alphas:
+            return ""
         
-        instruments_list = sorted(instrument_alphas.keys())
-        alphas_list = [instrument_alphas[inst] for inst in instruments_list]
-        counts_list = [instrument_counts[inst] for inst in instruments_list]
+        # Sort by alpha for better visualization
+        sorted_instruments = sorted(instrument_alphas.items(), key=lambda x: x[1], reverse=True)
         
-        # Chart 1: Average alpha by instrument
+        # Limit to top 30 performers if there are too many
+        max_display = 30
+        if len(sorted_instruments) > max_display:
+            # Show top 15 and bottom 15
+            top_15 = sorted_instruments[:15]
+            bottom_15 = sorted_instruments[-15:]
+            display_data = top_15 + [("...", 0)] + bottom_15
+            instruments_list = [x[0] for x in display_data]
+            alphas_list = [x[1] for x in display_data]
+            title_suffix = f" (Top/Bottom {15} of {len(sorted_instruments)})"
+        else:
+            instruments_list = [x[0] for x in sorted_instruments]
+            alphas_list = [x[1] for x in sorted_instruments]
+            title_suffix = ""
+        
+        # Create single full-width chart
+        fig, ax = plt.subplots(1, 1, figsize=(16, 8))
+        
+        # Average alpha by instrument
         colors = ['green' if a > 0 else 'red' for a in alphas_list]
-        bars1 = ax1.bar(instruments_list, alphas_list, color=colors, alpha=0.7)
-        ax1.axhline(y=0, color='black', linestyle='-', linewidth=1)
-        ax1.set_ylabel('Average Alpha (%)', fontsize=11)
-        ax1.set_title('Average Performance by Instrument', fontsize=12, fontweight='bold')
-        ax1.grid(True, alpha=0.3, axis='y')
+        bars = ax.bar(range(len(instruments_list)), alphas_list, color=colors, alpha=0.7)
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1)
+        ax.set_ylabel('Average Trade P&L (%)', fontsize=12)
+        ax.set_title(f'Average Performance by Instrument{title_suffix}', fontsize=14, fontweight='bold')
+        ax.set_xticks(range(len(instruments_list)))
+        ax.set_xticklabels(instruments_list, rotation=45, ha='right', fontsize=9)
+        ax.grid(True, alpha=0.3, axis='y')
         
-        # Add value labels on bars
-        for bar, alpha in zip(bars1, alphas_list):
-            height = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{alpha:.1f}%', ha='center', va='bottom' if height >= 0 else 'top', fontsize=9)
-        
-        # Chart 2: Number of configs tested per instrument
-        bars2 = ax2.bar(instruments_list, counts_list, color='steelblue', alpha=0.7)
-        ax2.set_ylabel('Number of Configs Tested', fontsize=11)
-        ax2.set_title('Test Coverage by Instrument', fontsize=12, fontweight='bold')
-        ax2.grid(True, alpha=0.3, axis='y')
-        
-        # Add value labels
-        for bar, count in zip(bars2, counts_list):
-            height = bar.get_height()
-            ax2.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{count}', ha='center', va='bottom', fontsize=9)
+        # Add value labels on bars (skip "..." separator)
+        for i, (bar, alpha, inst) in enumerate(zip(bars, alphas_list, instruments_list)):
+            if inst != "...":
+                height = bar.get_height()
+                ax.text(i, height, f'{alpha:.1f}%', 
+                       ha='center', va='bottom' if height >= 0 else 'top', 
+                       fontsize=8, rotation=0)
         
         plt.tight_layout()
         

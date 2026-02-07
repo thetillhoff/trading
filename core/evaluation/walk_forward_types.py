@@ -79,6 +79,9 @@ class WalkForwardResult:
     # Performance monitoring (optional): phase and per-indicator timings in seconds
     performance_timings: Optional[Dict[str, float]] = None
 
+    # Instruments actually used (may be subset of config.instruments when some were skipped)
+    instruments_used: Optional[List[str]] = None
+
     @property
     def summary(self) -> EvaluationSummary:
         """Create a summary compatible with code that expects EvaluationSummary."""

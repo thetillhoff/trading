@@ -3,11 +3,21 @@ Reporter utilities: constants, interest/date helpers, trades-to-DataFrame.
 
 Used by reporter_analysis, reporter_base, and reporter_charts.
 """
+from typing import List
+
 import numpy as np
 import pandas as pd
 from pathlib import Path
 
 from ..evaluation.walk_forward import WalkForwardResult
+
+
+def get_instruments_used(result: WalkForwardResult) -> List[str]:
+    """Instruments actually used in evaluation (excludes skipped). Prefer result.instruments_used over config.instruments."""
+    used = getattr(result, "instruments_used", None)
+    if used is not None:
+        return list(used)
+    return list(getattr(result.config, "instruments", None) or [])
 
 # Daily rate for 2% p.a. compound: (1.02)^(1/365.25) - 1 so that interest compounds to 2% per year
 CASH_DAILY_RATE_2PA = (1.02 ** (1 / 365.25)) - 1

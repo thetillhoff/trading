@@ -3,32 +3,28 @@
 Grid search CLI.
 
 Runs grid search over strategy configurations and generates comparison reports.
+Uses a temp dir on disk for configs and per-instrument data so workers load on demand
+and memory stays bounded (avoids OOM on large grids).
 """
 import argparse
+import pickle
+import re
 import sys
-from pathlib import Path
-import pandas as pd
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing
-
-from core.data.loader import DataLoader
-from core.signals.config import StrategyConfig, generate_grid_configs
-from core.signals.config_loader import load_config_from_yaml
-from core.signals.detector import SignalDetector
-from core.evaluation.walk_forward import WalkForwardEvaluator, WalkForwardResult
-from core.grid_test.reporter import ComparisonReporter
-from core.grid_test.analysis import analyze_results_dir
+import tempfile
+import time
 from datetime import datetime
+from pathlib import Path
+import multiprocessing
+from typing import Dict, List, Tuple
+from core.signals.config_loader import load_config_from_yaml
+from core.data.preparation import prepare_and_validate, DataPreparationError, VerifiedDataPrepResult
+from core.evaluation.walk_forward import WalkForwardResult
+from core.grid_test.analysis import analyze_results_dir
 
 
-def evaluate_config(config: StrategyConfig) -> WalkForwardResult:
-    """Evaluate a single configuration (for parallel execution)."""
-    evaluator = WalkForwardEvaluator(
-        lookback_days=config.lookback_days,
-        step_days=config.step_days,
-    )
-    # Use config's instruments and dates
-    return evaluator.evaluate_multi_instrument(config, verbose=False)
+def _safe_config_dirname(name: str) -> str:
+    """Safe filesystem directory name for config (e.g. grid_mtfon_ema8_filter_cert0.7)."""
+    return re.sub(r"[^\w\-.]", "_", str(name))
 
 
 def main():
@@ -58,8 +54,8 @@ Examples:
     parser.add_argument(
         "--workers",
         type=int,
-        default=8,
-        help="Number of parallel workers (default: 8)",
+        default=None,
+        help="Number of parallel workers (default: auto = CPU count, or 1 if 1 CPU)",
     )
     parser.add_argument(
         "--output-dir",
@@ -77,6 +73,11 @@ Examples:
         type=str,
         metavar="DIR",
         help="Run analysis only on an existing results dir (skips grid search). For multi-period dirs (e.g. hypothesis_tests_*), writes analysis_report.md and CSVs into DIR.",
+    )
+    parser.add_argument(
+        "--progress-file",
+        type=str,
+        help="Write progress updates to JSON file (e.g., results/progress.json). Must be in project directory to be visible on host.",
     )
     args = parser.parse_args()
 
@@ -149,107 +150,163 @@ Examples:
             print(f"Warning: Config '{config.name}' missing end_date, using 2020-01-01")
             config.end_date = "2020-01-01"
     
+    # Grid search requires identical date range and eval params across all configs
+    ref = configs[0]
+    for config in configs[1:]:
+        if config.start_date != ref.start_date or config.end_date != ref.end_date:
+            print(f"Error: Config '{config.name}' has different date range ({config.start_date}–{config.end_date}) "
+                  f"than '{ref.name}' ({ref.start_date}–{ref.end_date}). Grid search requires the same range for all.")
+            return 1
+        if config.lookback_days != ref.lookback_days or config.step_days != ref.step_days:
+            print(f"Error: Config '{config.name}' has different lookback_days/step_days than '{ref.name}'. "
+                  f"Grid search requires the same evaluation params for all.")
+            return 1
+    
+    # Union of instruments across all configs; single data prep for the whole grid
+    all_instruments = sorted(set(inst for c in configs for inst in c.instruments))
+    
     print(f"\nTesting {len(configs)} configurations...")
     print()
     
-    # Run evaluations in parallel (always enabled)
-    workers = args.workers
-    
-    # Set multiprocessing start method for Docker/macOS compatibility
-    # 'spawn' works better in Docker containers than 'fork'
+    _cpus = multiprocessing.cpu_count()
+    workers = args.workers if args.workers is not None else max(
+        1, _cpus if _cpus and _cpus > 0 else 1
+    )
     try:
         multiprocessing.set_start_method('spawn', force=True)
     except RuntimeError:
-        # Already set, ignore
         pass
     
-    print(f"Running {len(configs)} configurations in parallel with {workers} workers...")
-    print(f"  Using {multiprocessing.cpu_count()} available CPUs")
+    print(f"Step 1: Data preparation (once for all configs, {len(all_instruments)} instruments)...")
+    t0_prep = time.perf_counter()
+    try:
+        prep_result = prepare_and_validate(
+            instruments=all_instruments,
+            start_date=ref.start_date,
+            end_date=ref.end_date,
+            lookback_days=ref.lookback_days,
+            step_days=ref.step_days,
+            min_history_days=100,
+            column=ref.column,
+        )
+    except DataPreparationError as e:
+        print(f"  Data prep failed: {e}")
+        return 1
+    prep_elapsed = time.perf_counter() - t0_prep
+    print(f"  Data prep complete in {prep_elapsed:.1f}s ({len(prep_result.instruments)} instruments validated)")
     
-    results = []
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(evaluate_config, config): config
-            for config in configs
-        }
-        
-        completed = 0
-        for future in as_completed(futures):
-            config = futures[future]
-            try:
-                result = future.result()
-                results.append(result)
-                completed += 1
-                if completed % 10 == 0:
-                    print(f"  Progress: {completed}/{len(configs)} ({completed*100//len(configs)}%)")
-            except Exception as e:
-                print(f"  Error evaluating {config.name}: {e}")
+    # Per-config instrument list: intersection of config.instruments with validated list
+    valid_set = set(prep_result.instruments)
+    config_instruments: Dict[str, list] = {}
+    for config in configs:
+        inst_list = [i for i in config.instruments if i in valid_set]
+        if not inst_list:
+            print(f"Warning: Config '{config.name}' has no instruments with data in range; skipping.")
+            continue
+        config_instruments[config.name] = inst_list
+    configs = [c for c in configs if c.name in config_instruments]
+    if not configs:
+        print("Error: No configs have instruments with data in the requested range")
+        return 1
     
-    print(f"\nCompleted {len(results)}/{len(configs)} configurations")
-    
-    # Create grid search summary directory (use --output-dir when provided for hypothesis-test flows)
+    # Per-config prep view (same dates/eval_dates, filtered instruments) for downstream code
+    prep_results: Dict[str, VerifiedDataPrepResult] = {}
+    prep_share = prep_elapsed / len(configs) if configs else 0.0
+    for config in configs:
+        prep_results[config.name] = VerifiedDataPrepResult(
+            eval_dates=prep_result.eval_dates,
+            start_date=prep_result.start_date,
+            end_date=prep_result.end_date,
+            load_start=prep_result.load_start,
+            instruments=config_instruments[config.name],
+            min_history_days=prep_result.min_history_days,
+        )
+    prep_timings = {c.name: prep_share for c in configs}
+
+    # Pipeline: Data -> Indicators (deduplicated) -> per-config Signals -> Simulation -> Outputs -> GridReport
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     if args.output_dir:
         summary_dir = Path(args.output_dir)
+        results_root = summary_dir
     else:
         summary_dir = Path("results") / f"grid_search_{timestamp}"
+        results_root = Path("results")
     summary_dir.mkdir(parents=True, exist_ok=True)
+    workspace = Path(tempfile.mkdtemp(prefix="grid_search_"))
     
-    # Save per-config results to matching results/ structure
-    print(f"\nSaving per-config results...")
-    for result in results:
-        config = result.config
-        # Get relative path from configs/ for this config
-        rel_path = getattr(config, '_source_path', None) or config_file_map.get(config.name, Path(config.name))
-        result_dir = summary_dir / rel_path if args.output_dir else Path("results") / rel_path
-        result_dir.mkdir(parents=True, exist_ok=True)
+    # Checkpoint and progress paths
+    checkpoint_dir = workspace / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = checkpoint_dir / "execution.json"
+    progress_file = summary_dir / "progress.json"
+    
+    print(f"  Progress file: {progress_file}")
+    print(f"  Monitor with: watch -n 1 cat {progress_file}")
+    
+    try:
+        print(f"\nStep 2: Building execution plan (TaskGraph)...")
+        from core.orchestration.orchestrator import (
+            build_data_task_graph,
+            build_grid_search_task_graph,
+            run_tasks,
+        )
         
-        # Save individual config results with charts
-        config_reporter = ComparisonReporter(output_dir=str(result_dir))
-        config_reporter.save_results_csv([result], filename=f"backtest_results_{timestamp}.csv")
+        # Build data task
+        data_graph = build_data_task_graph(
+            workspace, ref, min_history_days=100, instruments=prep_result.instruments
+        )
         
-        # Generate comparison chart for this config (compares to baseline if available, or shows vs buy-and-hold)
-        baseline_result = next((r for r in results if 'baseline' in r.config.name.lower()), None)
-        if baseline_result and baseline_result != result:
-            # Compare this config to baseline
-            config_reporter.generate_comparison_chart([result, baseline_result], filename=f"comparison_{timestamp}")
-        else:
-            # Single config - generate comparison chart anyway (will show vs buy-and-hold)
-            config_reporter.generate_comparison_chart([result], filename=f"comparison_{timestamp}")
+        print(f"  Executing data preparation...")
+        run_tasks(
+            data_graph,
+            verbose=True,
+            max_workers=1,  # Data prep is single task
+            cache_enabled=True,
+        )
+        
+        print(f"\nStep 3: Building full execution graph...")
+        grid_graph = build_grid_search_task_graph(
+            workspace,
+            configs,
+            results_root,
+            summary_dir,
+            config_file_map,
+        )
+        
+        stats = grid_graph.get_stats()
+        levels = grid_graph.get_topological_levels()
+        print(f"  Total tasks: {stats['total']}")
+        print(f"  Execution levels: {len(levels)}")
+        print(f"  Max parallelism: {max(len(level) for level in levels if level)}")
+        
+        print(f"\nExecuting grid search with parallel execution and caching...")
+        run_tasks(
+            grid_graph,
+            verbose=True,
+            max_workers=workers,
+            cache_enabled=True,
+            checkpoint_path=checkpoint_path,
+            progress_file=progress_file,
+        )
+        
+        # Load results from workspace for baseline update (before workspace is removed)
+        from core.orchestration.contract import config_result_path
+        results_for_baseline = []
+        for c in configs:
+            path = config_result_path(workspace, c.name)
+            if path.exists():
+                with open(path, "rb") as f:
+                    results_for_baseline.append(pickle.load(f))
+        if results_for_baseline:
+            update_baseline_config(results_for_baseline)
+    finally:
+        import shutil
+        if workspace.exists():
+            shutil.rmtree(workspace, ignore_errors=True)
     
-    # Generate reports in summary directory (always enabled)
-    reporter = ComparisonReporter(output_dir=str(summary_dir))
-    
-    # Always generate charts
-    print(f"\nGenerating visualizations...")
-    reporter.generate_comparison_chart(results, filename=f"backtest_comparison_{timestamp}")
-    reporter.generate_dimension_charts(results, filename_prefix=f"grid_dimension_{timestamp}")
-    
-    # Generate new visualizations
-    reporter.generate_multi_strategy_equity_curve(results, filename_prefix=f"equity_curve_vs_2pa_{timestamp}")
-    reporter.generate_performance_by_instrument(results, filename_prefix=f"performance_by_instrument_{timestamp}")
-    
-    # Always save CSV results
-    csv_path = reporter.save_results_csv(results, filename=f"backtest_results_{timestamp}.csv")
-    param_csv_path = reporter.save_parameter_sensitivity_csv(results, filename_prefix=f"parameter_sensitivity_{timestamp}")
-    
-    # Generate analysis report
-    reporter.generate_analysis_report(results, filename=f"analysis_report_{timestamp}.md")
-    
-    # Run core CSV-based analysis (analysis_report.md, all_results_combined.csv, alpha_pivot)
-    print("\nRunning CSV analysis...")
-    analyze_results_dir(summary_dir, verbose=True)
-    
-    print(f"\nResults saved:")
+    print(f"\nCompleted {len(configs)} configurations. Per-config outputs: {results_root}/<rel_path>/")
     print(f"  Summary directory: {summary_dir}")
-    print(f"  Per-config results: results/{{subdirectory}}/")
-    print(f"  Charts: {summary_dir}")
-    print(f"  CSV files: {summary_dir}")
-    print(f"  Analysis report: {summary_dir}/analysis_report_{timestamp}.md")
-    
-    # Print summary
-    reporter.print_summary(results, top_n=10)
-    
+    print(f"  Grid charts and analysis_report: {summary_dir}")
     return 0
 
 

@@ -1,32 +1,50 @@
 """
 Analyze grid-test CSV results (single-run or multi-period).
 
-Loads backtest_results_*.csv from a directory (either directly for a single run,
-or from period subdirs for hypothesis/multi-period), computes alpha/metrics,
-and writes analysis_report.md, all_results_combined.csv, alpha_pivot_by_config_period.csv.
+Loads results.csv (canonical) or backtest_results_*.csv (legacy) from a directory
+(either directly for a single run, or from period subdirs for hypothesis/multi-period),
+computes alpha/metrics, and writes analysis_report.md, all_results_combined.csv,
+alpha_pivot_by_config_period.csv.
 """
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
+RESULTS_CSV = "results.csv"
+
+
+def _top_level_results_csvs(results_dir: Path):
+    """Canonical first, then legacy pattern."""
+    canonical = results_dir / RESULTS_CSV
+    if canonical.exists():
+        return [canonical]
+    return list(results_dir.glob("backtest_results_*.csv"))
+
+
+def _period_results_csvs(period_dir: Path):
+    """Canonical first, then legacy pattern."""
+    canonical = period_dir / RESULTS_CSV
+    if canonical.exists():
+        return [canonical]
+    return list(period_dir.glob("backtest_results_*.csv"))
+
 
 def load_results(results_dir: Path) -> pd.DataFrame:
     """
-    Load all backtest_results_*.csv from results_dir.
+    Load all results from results_dir (results.csv or backtest_results_*.csv).
 
-    Single-run: results_dir has backtest_results_*.csv directly (e.g. one grid run)
+    Single-run: results_dir has results.csv or backtest_results_*.csv directly
     → one row per config, column 'period' = "single".
 
-    Multi-period: results_dir has no top-level CSV, only subdirs with backtest_results_*.csv
-    → one row per config per period, column 'period' = subdir name (e.g. hypothesis).
+    Multi-period: results_dir has no top-level CSV, only subdirs with results.csv or
+    backtest_results_*.csv → one row per config per period, column 'period' = subdir name.
     """
     results_dir = Path(results_dir)
     all_results: list[pd.DataFrame] = []
 
-    top_level_csvs = list(results_dir.glob("backtest_results_*.csv"))
+    top_level_csvs = _top_level_results_csvs(results_dir)
     if top_level_csvs:
-        # Prefer top-level: one combined CSV = single run
         csv_file = max(top_level_csvs, key=lambda p: p.stat().st_mtime)
         try:
             df = pd.read_csv(csv_file)
@@ -35,10 +53,9 @@ def load_results(results_dir: Path) -> pd.DataFrame:
         except Exception:
             pass
 
-    # Multi-period: load from subdirs
     period_dirs = [d for d in results_dir.iterdir() if d.is_dir()]
     for period_dir in period_dirs:
-        csv_files = list(period_dir.glob("backtest_results_*.csv"))
+        csv_files = _period_results_csvs(period_dir)
         if not csv_files:
             continue
         csv_file = max(csv_files, key=lambda p: p.stat().st_mtime)

@@ -91,19 +91,34 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         min_confidence_inverted=elliott_inverted.get('min_confidence', ELLIOTT_INVERTED_MIN_CONFIDENCE),
         min_wave_size_inverted=elliott_inverted.get('min_wave_size', ELLIOTT_INVERTED_MIN_WAVE_SIZE),
         
-        # RSI
-        use_rsi=rsi.get('enabled', False),
+        # Derive indicator usage from weights (with fallback to enabled flag for backward compatibility)
+        indicator_weights=signals.get('indicator_weights'),
+        
+        # RSI - use weight if present, otherwise fall back to enabled flag
+        use_rsi=(
+            ('rsi' in signals.get('indicator_weights', {}) and signals.get('indicator_weights', {})['rsi'] > 0)
+            if signals.get('indicator_weights') is not None
+            else rsi.get('enabled', False)
+        ),
         rsi_period=rsi.get('period', RSI_PERIOD),
         rsi_oversold=rsi.get('oversold', RSI_OVERSOLD),
         rsi_overbought=rsi.get('overbought', RSI_OVERBOUGHT),
         
-        # EMA
-        use_ema=ema.get('enabled', False),
+        # EMA - use weight if present, otherwise fall back to enabled flag
+        use_ema=(
+            ('ema' in signals.get('indicator_weights', {}) and signals.get('indicator_weights', {})['ema'] > 0)
+            if signals.get('indicator_weights') is not None
+            else ema.get('enabled', False)
+        ),
         ema_short_period=ema.get('short_period', EMA_SHORT_PERIOD),
         ema_long_period=ema.get('long_period', EMA_LONG_PERIOD),
         
-        # MACD
-        use_macd=macd.get('enabled', False),
+        # MACD - use weight if present, otherwise fall back to enabled flag
+        use_macd=(
+            ('macd' in signals.get('indicator_weights', {}) and signals.get('indicator_weights', {})['macd'] > 0)
+            if signals.get('indicator_weights') is not None
+            else macd.get('enabled', False)
+        ),
         macd_fast=macd.get('fast', MACD_FAST),
         macd_slow=macd.get('slow', MACD_SLOW),
         macd_signal=macd.get('signal', MACD_SIGNAL),
@@ -113,7 +128,6 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         min_confirmations=signals.get('min_confirmations'),
         min_certainty=signals.get('min_certainty'),
         use_trend_filter=signals.get('use_trend_filter', USE_TREND_FILTER),
-        indicator_weights=signals.get('indicator_weights'),
         use_multi_timeframe=signals.get('use_multi_timeframe', False),
         multi_timeframe_weekly_ema_period=signals.get('multi_timeframe_weekly_ema_period', 8),
         use_multi_timeframe_filter=signals.get('use_multi_timeframe_filter', True),
@@ -195,18 +209,15 @@ def save_config_to_yaml(config: StrategyConfig, yaml_path: Union[str, Path]):
                 'enabled': config.use_elliott_wave_inverted_exit,
             },
             'rsi': {
-                'enabled': config.use_rsi,
                 'period': config.rsi_period,
                 'oversold': config.rsi_oversold,
                 'overbought': config.rsi_overbought,
             },
             'ema': {
-                'enabled': config.use_ema,
                 'short_period': config.ema_short_period,
                 'long_period': config.ema_long_period,
             },
             'macd': {
-                'enabled': config.use_macd,
                 'fast': config.macd_fast,
                 'slow': config.macd_slow,
                 'signal': config.macd_signal,

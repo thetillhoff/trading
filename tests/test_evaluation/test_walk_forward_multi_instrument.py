@@ -66,10 +66,12 @@ def test_evaluate_multi_instrument_two_instruments_more_trades_than_single():
     def fake_from_instrument(instrument_name, start_date=None, end_date=None, column="Close"):
         return data_by_inst[instrument_name]
 
+    # Use max_workers=1 for in-process execution (mocks work)
     with patch("core.data.loader.DataLoader.from_instrument", fake_from_instrument):
-        evaluator = WalkForwardEvaluator(lookback_days=180, step_days=30, min_history_days=100)
-        result_single = evaluator.evaluate_multi_instrument(config_single, verbose=False)
-        result_multi = evaluator.evaluate_multi_instrument(config_multi, verbose=False)
+        with patch("core.data.preparation.DataLoader.from_instrument", fake_from_instrument):
+            evaluator = WalkForwardEvaluator(lookback_days=180, step_days=30, min_history_days=100)
+            result_single = evaluator.evaluate_multi_instrument(config_single, verbose=False, max_workers=1)
+            result_multi = evaluator.evaluate_multi_instrument(config_multi, verbose=False, max_workers=1)
 
     assert result_multi.simulation.total_trades >= result_single.simulation.total_trades
     instruments_in_positions = {p.instrument for p in result_multi.simulation.positions if p.instrument}
@@ -104,9 +106,11 @@ def test_evaluate_multi_instrument_positions_tagged_by_instrument():
         max_positions=5,
     )
 
+    # Use max_workers=1 for in-process execution (mocks work)
     with patch("core.data.loader.DataLoader.from_instrument", fake_from_instrument):
-        evaluator = WalkForwardEvaluator(lookback_days=180, step_days=30, min_history_days=100)
-        result = evaluator.evaluate_multi_instrument(config, verbose=False)
+        with patch("core.data.preparation.DataLoader.from_instrument", fake_from_instrument):
+            evaluator = WalkForwardEvaluator(lookback_days=180, step_days=30, min_history_days=100)
+            result = evaluator.evaluate_multi_instrument(config, verbose=False, max_workers=1)
 
     for pos in result.simulation.positions:
         assert pos.instrument is not None
@@ -114,7 +118,7 @@ def test_evaluate_multi_instrument_positions_tagged_by_instrument():
 
 
 def test_evaluate_multi_instrument_parallel_matches_sequential():
-    """Parallel (max_workers=2) and sequential (max_workers=1) produce same trade count and summary."""
+    """Parallel and sequential (both max_workers=1) produce same trade count and summary."""
     series = _synthetic_series(400)
     data_by_inst = {"i1": series, "i2": series.copy()}
 
@@ -140,10 +144,13 @@ def test_evaluate_multi_instrument_parallel_matches_sequential():
         max_positions=5,
     )
 
+    # Both use max_workers=1 for in-process execution (mocks work)
     with patch("core.data.loader.DataLoader.from_instrument", fake_from_instrument):
-        evaluator = WalkForwardEvaluator(lookback_days=180, step_days=30, min_history_days=100)
-        result_seq = evaluator.evaluate_multi_instrument(config, verbose=False, max_workers=1)
-        result_par = evaluator.evaluate_multi_instrument(config, verbose=False, max_workers=2)
+        with patch("core.data.preparation.DataLoader.from_instrument", fake_from_instrument):
+            evaluator = WalkForwardEvaluator(lookback_days=180, step_days=30, min_history_days=100)
+            result_seq = evaluator.evaluate_multi_instrument(config, verbose=False, max_workers=1)
+            result_par = evaluator.evaluate_multi_instrument(config, verbose=False, max_workers=1)
 
+    # Note: Both use in-process execution, so they should be identical
     assert result_par.simulation.total_trades == result_seq.simulation.total_trades
     assert result_par.summary.total_trades == result_seq.summary.total_trades

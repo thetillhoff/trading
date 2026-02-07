@@ -266,3 +266,223 @@ data:
             assert config.instruments == ['djia']
         finally:
             path.unlink(missing_ok=True)
+
+
+class TestWeightBasedIndicatorEnablement:
+    """Test that indicators are enabled based on indicator_weights."""
+    
+    def test_indicators_enabled_when_weighted(self):
+        """Indicators with weights > 0 should be enabled."""
+        yaml_content = """
+name: test_weighted
+description: Test config with weighted indicators
+
+indicators:
+  elliott_wave:
+    enabled: true
+    min_confidence: 0.65
+    min_wave_size: 0.02
+  rsi:
+    period: 14
+    oversold: 30
+    overbought: 70
+  ema:
+    short_period: 12
+    long_period: 26
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+
+signals:
+  indicator_weights:
+    rsi: 0.4
+    ema: 0.3
+    macd: 0.3
+
+risk:
+  risk_reward: 2.0
+  position_size_pct: 0.1
+
+costs:
+  trade_fee_pct: 0.001
+
+evaluation:
+  step_days: 1
+  lookback_days: 365
+
+data:
+  instruments: [sp500]
+  start_date: '2020-01-01'
+  end_date: '2021-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            config = load_config_from_yaml(path)
+            assert config.use_rsi is True
+            assert config.use_ema is True
+            assert config.use_macd is True
+        finally:
+            path.unlink(missing_ok=True)
+    
+    def test_indicators_disabled_when_not_weighted(self):
+        """Indicators without weights should be disabled."""
+        yaml_content = """
+name: test_no_weights
+description: Test config without indicator weights
+
+indicators:
+  elliott_wave:
+    enabled: true
+    min_confidence: 0.65
+    min_wave_size: 0.02
+  rsi:
+    period: 14
+  ema:
+    short_period: 12
+    long_period: 26
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+
+signals:
+  signal_types: all
+
+risk:
+  risk_reward: 2.0
+  position_size_pct: 0.1
+
+costs:
+  trade_fee_pct: 0.001
+
+evaluation:
+  step_days: 1
+  lookback_days: 365
+
+data:
+  instruments: [sp500]
+  start_date: '2020-01-01'
+  end_date: '2021-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            config = load_config_from_yaml(path)
+            assert config.use_rsi is False
+            assert config.use_ema is False
+            assert config.use_macd is False
+        finally:
+            path.unlink(missing_ok=True)
+    
+    def test_partial_weights(self):
+        """Only weighted indicators should be enabled."""
+        yaml_content = """
+name: test_partial
+description: Test config with partial weights
+
+indicators:
+  elliott_wave:
+    enabled: true
+    min_confidence: 0.65
+    min_wave_size: 0.02
+  rsi:
+    period: 14
+  ema:
+    short_period: 12
+    long_period: 26
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+
+signals:
+  indicator_weights:
+    rsi: 0.6
+    mtf: 0.4
+
+risk:
+  risk_reward: 2.0
+  position_size_pct: 0.1
+
+costs:
+  trade_fee_pct: 0.001
+
+evaluation:
+  step_days: 1
+  lookback_days: 365
+
+data:
+  instruments: [sp500]
+  start_date: '2020-01-01'
+  end_date: '2021-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            config = load_config_from_yaml(path)
+            assert config.use_rsi is True
+            assert config.use_ema is False
+            assert config.use_macd is False
+        finally:
+            path.unlink(missing_ok=True)
+    
+    def test_backward_compatibility_with_enabled_flag(self):
+        """Old configs with enabled flags should still work."""
+        yaml_content = """
+name: test_legacy
+description: Test backward compatibility
+
+indicators:
+  elliott_wave:
+    enabled: true
+    min_confidence: 0.65
+    min_wave_size: 0.02
+  rsi:
+    enabled: true
+    period: 14
+  ema:
+    enabled: false
+    short_period: 12
+    long_period: 26
+  macd:
+    enabled: true
+    fast: 12
+    slow: 26
+    signal: 9
+
+signals:
+  signal_types: all
+
+risk:
+  risk_reward: 2.0
+  position_size_pct: 0.1
+
+costs:
+  trade_fee_pct: 0.001
+
+evaluation:
+  step_days: 1
+  lookback_days: 365
+
+data:
+  instruments: [sp500]
+  start_date: '2020-01-01'
+  end_date: '2021-01-01'
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(yaml_content)
+            path = Path(f.name)
+        try:
+            config = load_config_from_yaml(path)
+            # When no weights specified, should fall back to enabled flags
+            assert config.use_rsi is True
+            assert config.use_ema is False
+            assert config.use_macd is True
+        finally:
+            path.unlink(missing_ok=True)
+

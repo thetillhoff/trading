@@ -28,7 +28,7 @@ If I ask for adjustments to code I have provided you, do not repeat all of my co
 
 ## Project-Specific Guidelines
 
-**IMPORTANT**: Always consult `DEVELOPMENT.md` first for architecture, design decisions, and implementation details. See that file for data flow, module responsibilities, and extension points.
+**IMPORTANT**: Always consult `DEVELOPMENT.md` first for architecture, design decisions, and implementation details. See that file for data flow, module responsibilities, and extension points. Keep it up to date, too. At the same time ensure there are no unnecessary contents, like code examples. It should only describe the general architecture and design decisions, not the specific code.
 
 ### Docker & Makefile Usage
 

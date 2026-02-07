@@ -6,6 +6,7 @@ and filtering by date ranges.
 """
 from .loader import DataLoader, list_available_tickers
 from .scraper import download_instrument, list_instruments, get_available_instruments
+from .preparation import prepare_and_validate, VerifiedDataPrepResult, DataPreparationError
 
 __all__ = [
     'DataLoader',
@@ -13,4 +14,7 @@ __all__ = [
     'download_instrument',
     'list_instruments',
     'get_available_instruments',
+    'prepare_and_validate',
+    'VerifiedDataPrepResult',
+    'DataPreparationError',
 ]

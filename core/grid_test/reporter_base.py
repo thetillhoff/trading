@@ -40,7 +40,7 @@ class ComparisonReporter(ReporterChartsMixin):
         
         Format: results/{relative_path_from_configs}/{filename}
         Example: configs/optimization/ew_all_indicators_wave_001.yaml 
-                 → results/optimization/ew_all_indicators_wave_001/backtest_results.csv
+                 → results/optimization/ew_all_indicators_wave_001/results.csv
         
         Args:
             config: Strategy configuration

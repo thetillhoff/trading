@@ -13,19 +13,23 @@ Key rules:
 """
 import pandas as pd
 import numpy as np
+import hashlib
 from typing import List, Dict, Optional, Tuple
+from scipy.signal import argrelextrema
 
 from .elliott_types import WaveType, WaveLabel, Wave
 
 
 class ElliottWaveDetector:
-    """Detects Elliott Wave patterns in price data."""
+    """Detects Elliott Wave patterns in price data with intelligent caching."""
     
     def __init__(
         self,
         min_wave_length: Optional[int] = None,
         max_wave_length: Optional[int] = None,
-        retracement_threshold: float = 0.236
+        retracement_threshold: float = 0.236,
+        enable_cache: bool = True,
+        max_cache_size: int = 1000
     ):
         """
         Initialize the Elliott Wave detector.
@@ -34,10 +38,19 @@ class ElliottWaveDetector:
             min_wave_length: Minimum data points per wave (practical filter, not EW theory)
             max_wave_length: Maximum data points per wave (practical limit)
             retracement_threshold: Minimum retracement (default 0.236 = Fibonacci 23.6%)
+            enable_cache: Enable caching of wave detection results (default True)
+            max_cache_size: Maximum number of cached results to keep (default 1000)
         """
         self.min_wave_length = min_wave_length
         self.max_wave_length = max_wave_length
         self.retracement_threshold = retracement_threshold
+        self.enable_cache = enable_cache
+        self.max_cache_size = max_cache_size
+        
+        # Cache: {cache_key: List[Wave]}
+        self._wave_cache: Dict[str, List[Wave]] = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
     
     def detect_waves(
         self,
@@ -47,7 +60,7 @@ class ElliottWaveDetector:
         only_complete_patterns: bool = False
     ) -> List[Wave]:
         """
-        Detect Elliott Wave patterns in the price data.
+        Detect Elliott Wave patterns in the price data with caching.
         
         Args:
             data: Time series data with datetime index
@@ -66,6 +79,70 @@ class ElliottWaveDetector:
         and false positives. They are not requirements from Elliott Wave theory, which focuses
         on wave relationships, Fibonacci ratios, and internal structure rather than absolute
         size thresholds. Use the filter optimizer to find appropriate values for your data.
+        """
+        # Check cache first
+        if self.enable_cache:
+            cache_key = self._compute_cache_key(data, min_confidence, min_wave_size_ratio, only_complete_patterns)
+            if cache_key in self._wave_cache:
+                self._cache_hits += 1
+                return self._wave_cache[cache_key]
+            self._cache_misses += 1
+        
+        # Perform wave detection
+        waves = self._detect_waves_internal(data, min_confidence, min_wave_size_ratio, only_complete_patterns)
+        
+        # Store in cache
+        if self.enable_cache:
+            self._wave_cache[cache_key] = waves
+            # Limit cache size using simple FIFO
+            if len(self._wave_cache) > self.max_cache_size:
+                # Remove oldest entry (first key)
+                first_key = next(iter(self._wave_cache))
+                del self._wave_cache[first_key]
+        
+        return waves
+    
+    def _compute_cache_key(
+        self,
+        data: pd.Series,
+        min_confidence: float,
+        min_wave_size_ratio: float,
+        only_complete_patterns: bool
+    ) -> str:
+        """
+        Compute a cache key for the given data and parameters.
+        
+        Uses date range + data hash for efficient cache hits on overlapping data.
+        """
+        # Use date range and a hash of the last 10 values for quick cache key
+        # This captures data changes while being fast to compute
+        start_date = data.index[0].isoformat() if len(data) > 0 else ""
+        end_date = data.index[-1].isoformat() if len(data) > 0 else ""
+        
+        # Hash the last few values to detect data changes
+        # Using last 10 values is fast and catches most data updates
+        last_values = data.tail(10).values
+        data_hash = hashlib.md5(last_values.tobytes()).hexdigest()[:8]
+        
+        # Include detector configuration and filter parameters
+        key = (
+            f"{start_date}_{end_date}_{len(data)}_{data_hash}_"
+            f"{self.min_wave_length}_{self.max_wave_length}_{self.retracement_threshold:.3f}_"
+            f"{min_confidence:.3f}_{min_wave_size_ratio:.3f}_{only_complete_patterns}"
+        )
+        return key
+    
+    def _detect_waves_internal(
+        self,
+        data: pd.Series,
+        min_confidence: float = 0.0,
+        min_wave_size_ratio: float = 0.0,
+        only_complete_patterns: bool = False
+    ) -> List[Wave]:
+        """
+        Internal wave detection logic (called after cache miss).
+        
+        This is the actual detection logic, separated from detect_waves() for caching.
         """
         # Check minimum wave length if specified
         if self.min_wave_length is not None:
@@ -100,6 +177,28 @@ class ElliottWaveDetector:
             waves = self._filter_waves(data, waves, min_confidence, min_wave_size_ratio, only_complete_patterns)
         
         return waves
+    
+    def get_cache_stats(self) -> Dict[str, int]:
+        """
+        Get cache statistics for performance monitoring.
+        
+        Returns:
+            Dictionary with cache_hits, cache_misses, cache_size, hit_rate
+        """
+        total = self._cache_hits + self._cache_misses
+        hit_rate = (self._cache_hits / total * 100) if total > 0 else 0.0
+        return {
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+            "cache_size": len(self._wave_cache),
+            "hit_rate_pct": hit_rate
+        }
+    
+    def clear_cache(self) -> None:
+        """Clear the wave cache and reset statistics."""
+        self._wave_cache.clear()
+        self._cache_hits = 0
+        self._cache_misses = 0
     
     def _validate_pattern_rules(
         self,
@@ -338,29 +437,31 @@ class ElliottWaveDetector:
     
     def _find_extrema(self, data: pd.Series, window: int = 3) -> List[Tuple[int, float, str]]:
         """
-        Find local peaks and troughs in the data.
+        Find local maxima (peaks) and minima (troughs) in the data using scipy.
         
         Args:
             data: Time series data
-            window: Window size for finding extrema
+            window: Number of points on each side to check (min=1)
             
         Returns:
             List of (index, value, type) tuples where type is 'peak' or 'trough'
         """
-        extrema = []
         values = data.values
-        indices = data.index
         
-        for i in range(window, len(values) - window):
-            # Check for peak
-            if all(values[i] >= values[i-j] for j in range(1, window+1)) and \
-               all(values[i] >= values[i+j] for j in range(1, window+1)):
-                extrema.append((i, values[i], 'peak'))
-            
-            # Check for trough
-            elif all(values[i] <= values[i-j] for j in range(1, window+1)) and \
-                 all(values[i] <= values[i+j] for j in range(1, window+1)):
-                extrema.append((i, values[i], 'trough'))
+        # Use scipy's argrelextrema for fast peak/trough detection
+        # order parameter acts like the window - checks order points on each side
+        peak_indices = argrelextrema(values, np.greater_equal, order=window)[0]
+        trough_indices = argrelextrema(values, np.less_equal, order=window)[0]
+        
+        # Combine peaks and troughs into single list with labels
+        extrema = []
+        for idx in peak_indices:
+            extrema.append((idx, values[idx], 'peak'))
+        for idx in trough_indices:
+            extrema.append((idx, values[idx], 'trough'))
+        
+        # Sort by index to maintain chronological order
+        extrema.sort(key=lambda x: x[0])
         
         return extrema
     

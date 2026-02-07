@@ -67,6 +67,15 @@ class TestLoadResults:
         assert out["strategy"].iloc[0] == "top"
         assert out["period"].iloc[0] == "single"
 
+    def test_canonical_results_csv_loaded(self, tmp_path):
+        """Canonical results.csv is loaded when present."""
+        df_src = pd.DataFrame([_minimal_result_row("canonical_cfg")])
+        (tmp_path / "results.csv").write_text(df_src.to_csv(index=False))
+        out = load_results(tmp_path)
+        assert len(out) == 1
+        assert out["strategy"].iloc[0] == "canonical_cfg"
+        assert out["period"].iloc[0] == "single"
+
 
 class TestCalculateAlphaMetrics:
     def test_adds_alpha_and_expectancy(self):
