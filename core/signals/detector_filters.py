@@ -66,7 +66,9 @@ def filter_signals_by_quality(
 
 def deduplicate_signals(signals: List[TradingSignal]) -> List[TradingSignal]:
     """
-    Remove duplicate signals on the same day (first occurrence kept per (date, signal_type)).
+    Remove duplicate signals with exact same timestamp, type, and price.
+    
+    Keeps signals on same day with different timestamps or prices (multiple opportunities).
 
     Args:
         signals: List of trading signals (assumed sorted by timestamp)
@@ -77,7 +79,7 @@ def deduplicate_signals(signals: List[TradingSignal]) -> List[TradingSignal]:
     seen = set()
     unique = []
     for sig in signals:
-        key = (sig.timestamp.date(), sig.signal_type)
+        key = (sig.timestamp, sig.signal_type, sig.price)
         if key not in seen:
             seen.add(key)
             unique.append(sig)

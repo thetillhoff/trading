@@ -402,7 +402,10 @@ def run_simulation_task(
         with open(p, "rb") as f:
             sigs = pickle.load(f)
         all_signals.extend(sigs)
-    all_signals = sorted(all_signals, key=lambda s: s.timestamp)
+    
+    # Sort by timestamp first, then by confidence (DESC) to prioritize highest-quality signals
+    # when timestamps match. This removes alphabetical bias.
+    all_signals = sorted(all_signals, key=lambda s: (s.timestamp, -getattr(s, 'confidence', 0.0)))
     prices_by_instrument = {}
     for inst in instruments:
         dp = instrument_data_path(root, inst)

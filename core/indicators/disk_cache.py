@@ -1,7 +1,7 @@
 """
 Disk-based caching for indicator results across grid search runs.
 
-Indicators are cached in ~/.cache/trading/indicators/ with keys based on
+Indicators are cached in .cache/trading/indicators/ (project-local) with keys based on
 instrument + indicator_type + params_hash. This enables cross-run reuse.
 """
 import hashlib
@@ -13,7 +13,9 @@ from typing import Any, Dict, Optional
 
 log = logging.getLogger(__name__)
 
-CACHE_DIR = Path.home() / ".cache" / "trading" / "indicators"
+# Project-local cache directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+CACHE_DIR = PROJECT_ROOT / ".cache" / "trading" / "indicators"
 
 
 def compute_indicator_cache_key(instrument: str, indicator_type: str, params: Dict[str, Any]) -> str:

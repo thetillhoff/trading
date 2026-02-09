@@ -1,7 +1,5 @@
 # Trading Strategy Roadmap
 
-w10 should be the same as before vectorization
-
 
 ## Time ranges / events to analyze
 

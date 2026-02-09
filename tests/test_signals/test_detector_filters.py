@@ -16,11 +16,12 @@ def _signal(
     signal_type: SignalType,
     confirmations: int = 0,
     confirmation_score=None,
+    price: float = 100.0,
 ):
     return TradingSignal(
         signal_type=signal_type,
         timestamp=pd.Timestamp(ts_date),
-        price=100.0,
+        price=price,
         confidence=0.7,
         source="test",
         reasoning="",
@@ -89,9 +90,17 @@ class TestFilterSignalsByQuality:
 
 
 class TestDeduplicateSignals:
-    def test_same_day_same_type_keeps_first(self):
+    def test_same_day_same_type_different_time_both_kept(self):
+        # Different timestamps on same day should be kept (multiple opportunities)
         a = _signal("2020-01-01 09:00", SignalType.BUY)
         b = _signal("2020-01-01 15:00", SignalType.BUY)
+        result = deduplicate_signals([a, b])
+        assert len(result) == 2
+        
+    def test_exact_duplicate_removed(self):
+        # Exact same timestamp, type, and price should deduplicate
+        a = _signal("2020-01-01 09:00", SignalType.BUY, price=100.0)
+        b = _signal("2020-01-01 09:00", SignalType.BUY, price=100.0)
         result = deduplicate_signals([a, b])
         assert len(result) == 1
         assert result[0].timestamp == a.timestamp

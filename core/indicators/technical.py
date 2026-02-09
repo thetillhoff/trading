@@ -346,9 +346,10 @@ class TechnicalIndicators:
         use_regime_detection = getattr(config, 'use_regime_detection', False) if config else False
         
         # Check which technical indicators are needed (based on indicator_weights)
-        use_rsi = getattr(config, 'use_rsi', False) if config else False
-        use_ema = getattr(config, 'use_ema', False) if config else False
-        use_macd = getattr(config, 'use_macd', False) if config else False
+        # Default to True if no config provided (backward compatibility for tests)
+        use_rsi = getattr(config, 'use_rsi', True) if config else True
+        use_ema = getattr(config, 'use_ema', True) if config else True
+        use_macd = getattr(config, 'use_macd', True) if config else True
         
         if workers <= 1:
             # Sequential (e.g. testing or single-threaded)

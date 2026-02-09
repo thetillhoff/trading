@@ -449,6 +449,8 @@ class SignalDetector:
                         rsi_value=row.get("rsi"),
                         ema_short=ema_short,
                         ema_long=ema_long,
+                        macd_value=row.get("macd_line"),
+                        macd_signal=row.get("macd_signal"),
                         macd_histogram=row.get("macd_histogram"),
                     )
                 )
@@ -470,6 +472,8 @@ class SignalDetector:
                         rsi_value=row.get("rsi"),
                         ema_short=ema_short,
                         ema_long=ema_long,
+                        macd_value=row.get("macd_line"),
+                        macd_signal=row.get("macd_signal"),
                         macd_histogram=row.get("macd_histogram"),
                     )
                 )
@@ -652,6 +656,15 @@ class SignalDetector:
             confirmed, reason, count, indicators = self._check_indicator_confirmation(
                 signal, indicator_df
             )
+            # Copy indicator values to signal for trade record keeping
+            if indicators is not None:
+                signal.rsi_value = indicators.rsi
+                signal.ema_short = indicators.ema_short
+                signal.ema_long = indicators.ema_long
+                signal.macd_value = indicators.macd_line
+                signal.macd_signal = indicators.macd_signal
+                signal.macd_histogram = indicators.macd_histogram
+            
             if confirmed:
                 signal.reasoning += f" | {reason}"
                 signal.indicator_confirmations = count
@@ -766,6 +779,15 @@ class SignalDetector:
             confirmed, reason, count, indicators = self._check_indicator_confirmation(
                 signal, indicator_df
             )
+            # Copy indicator values to signal for trade record keeping
+            if indicators is not None:
+                signal.rsi_value = indicators.rsi
+                signal.ema_short = indicators.ema_short
+                signal.ema_long = indicators.ema_long
+                signal.macd_value = indicators.macd_line
+                signal.macd_signal = indicators.macd_signal
+                signal.macd_histogram = indicators.macd_histogram
+            
             if confirmed:
                 signal.reasoning += f" | {reason}"
                 signal.indicator_confirmations = count

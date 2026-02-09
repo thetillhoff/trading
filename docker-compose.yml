@@ -6,8 +6,8 @@ services:
       - .:/app:rw
       # Data directory (read-write for downloads)
       - ./data:/app/data:rw
-      # Mount host cache directory for persistent indicator caching across runs
-      - ~/.cache/trading:/root/.cache/trading:rw
+      # Mount project-local cache directory for persistent indicator caching across runs
+      - ./.cache/trading:/root/.cache/trading:rw
     working_dir: /app
     environment:
       - PYTHONPATH=/app

@@ -158,9 +158,16 @@ class TestCalculateAll:
     """Test combined indicator calculation."""
     
     def test_calculate_all_columns(self, sample_prices):
-        """calculate_all should return all indicator columns."""
+        """calculate_all should return all indicator columns when explicitly configured."""
+        from core.signals.config import SignalConfig
+        config = SignalConfig(
+            use_rsi=True,
+            use_ema=True,
+            use_macd=True,
+            use_regime_detection=True  # Explicitly enable all indicators for this test
+        )
         indicators = TechnicalIndicators()
-        df = indicators.calculate_all(sample_prices)
+        df = indicators.calculate_all(sample_prices, config=config)
         
         expected_cols = [
             'price', 'rsi', 'rsi_oversold', 'rsi_overbought',
@@ -175,9 +182,13 @@ class TestCalculateAll:
             assert col in df.columns
     
     def test_calculate_all_with_dataframe(self, sample_ohlcv):
-        """calculate_all should work with DataFrame input."""
+        """calculate_all should work with DataFrame input and compute ADX when regime detection enabled."""
+        from core.signals.config import SignalConfig
+        config = SignalConfig(
+            use_regime_detection=True  # Explicitly enable regime detection to test ADX
+        )
         indicators = TechnicalIndicators()
-        df = indicators.calculate_all(sample_ohlcv)
+        df = indicators.calculate_all(sample_ohlcv, config=config)
 
         assert len(df) == len(sample_ohlcv)
         assert 'price' in df.columns
@@ -185,18 +196,32 @@ class TestCalculateAll:
 
     def test_calculate_all_parallel_matches_sequential(self, sample_prices):
         """Parallel (max_workers=6) and sequential (max_workers=1) produce identical output."""
+        from core.signals.config import SignalConfig
+        config = SignalConfig(
+            use_rsi=True,
+            use_ema=True,
+            use_macd=True,
+            use_regime_detection=True  # Test all indicators for parallel consistency
+        )
         indicators = TechnicalIndicators()
-        df_seq = indicators.calculate_all(sample_prices, max_workers=1)
-        df_par = indicators.calculate_all(sample_prices, max_workers=6)
+        df_seq = indicators.calculate_all(sample_prices, max_workers=1, config=config)
+        df_par = indicators.calculate_all(sample_prices, max_workers=6, config=config)
         pd.testing.assert_frame_equal(
             df_seq.sort_index(axis=1), df_par.sort_index(axis=1)
         )
 
     def test_calculate_all_timings_accumulate(self, sample_prices):
         """When timings= dict is passed, per-indicator keys are populated (parallel or sequential)."""
+        from core.signals.config import SignalConfig
+        config = SignalConfig(
+            use_rsi=True,
+            use_ema=True,
+            use_macd=True,
+            use_regime_detection=True  # Enable all indicators to test timing accumulation
+        )
         indicators = TechnicalIndicators()
         timings = {}
-        indicators.calculate_all(sample_prices, timings=timings, max_workers=6)
+        indicators.calculate_all(sample_prices, timings=timings, max_workers=6, config=config)
         expected_keys = {
             "indicator_rsi", "indicator_ema", "indicator_macd",
             "indicator_adx_ma", "indicator_volatility", "indicator_atr",
