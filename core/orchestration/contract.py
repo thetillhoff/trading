@@ -50,6 +50,7 @@ TRADES_CSV = "trades.csv"
 INDICATORS_CSV = "indicators.csv"
 RESULTS_CSV = "results.csv"
 CONFIG_TXT = "config.txt"
+CONFIG_YAML = "config.yaml"  # Timestamped copy of the original config
 
 # --- Data task ---
 DATA_DIR = "data"

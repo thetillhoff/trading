@@ -287,7 +287,8 @@ Examples:
             run_tasks(data_graph, verbose=True, cache_enabled=True)
             
             # Build and execute evaluation tasks
-            eval_graph = build_single_eval_task_graph(workspace_root, output_dir, config)
+            config_yaml = Path(args.config) if args.config else None
+            eval_graph = build_single_eval_task_graph(workspace_root, output_dir, config, config_yaml_path=config_yaml)
             run_tasks(eval_graph, verbose=True, cache_enabled=True)
             
             from core.orchestration.contract import config_result_path
@@ -382,6 +383,17 @@ Examples:
         print(f"\nTrades CSV saved: {trades_csv} (all {total_trades} trades)")
     reporter.save_results_csv([result], filename=RESULTS_CSV)
 
+    # Copy config YAML to output dir with timestamp (if available)
+    if args.config:
+        from datetime import datetime
+        import shutil
+        from core.orchestration.contract import CONFIG_YAML, timestamped_filename
+        config_yaml_path = Path(args.config)
+        if config_yaml_path.exists():
+            timestamped_config = output_dir / timestamped_filename(CONFIG_YAML)
+            shutil.copy2(config_yaml_path, timestamped_config)
+            print(f"Config YAML saved: {timestamped_config}")
+    
     # Save configuration summary to text file
     config_path = output_dir / CONFIG_TXT
     with open(config_path, 'w') as f:

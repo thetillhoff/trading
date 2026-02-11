@@ -468,18 +468,21 @@ def run_outputs_task(
     result_path: Path,
     output_dir: Path,
     data_root: Path = None,
+    config_yaml_path: Path = None,
 ) -> Path:
     """
     Outputs task: read WalkForwardResult from disk, write trades.csv, indicators.csv,
     results.csv and all per-config charts to output_dir.
 
     If data_root is provided, loads price data from data_root/data/ for chart generation.
+    If config_yaml_path is provided, copies the config YAML to output_dir with timestamp.
     Returns output_dir.
     """
     from .contract import (
         TRADES_CSV,
         INDICATORS_CSV,
         RESULTS_CSV,
+        CONFIG_YAML,
         CHART_ALPHA_OVER_TIME,
         CHART_VALUE_GAIN_PER_INSTRUMENT,
         CHART_SCATTER_PNL_DURATION,
@@ -499,12 +502,20 @@ def run_outputs_task(
     from ..grid_test.reporter_utils import trades_to_dataframe
 
     import gc
+    import shutil
     
     result_path = Path(result_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     with open(result_path, "rb") as f:
         result = pickle.load(f)
+    
+    # Copy config YAML to output dir with timestamp if provided
+    if config_yaml_path is not None:
+        config_yaml_path = Path(config_yaml_path)
+        if config_yaml_path.exists():
+            timestamped_config = output_dir / timestamped_filename(CONFIG_YAML)
+            shutil.copy2(config_yaml_path, timestamped_config)
     
     # Generate timestamped filenames
     trades_filename = timestamped_filename(TRADES_CSV)

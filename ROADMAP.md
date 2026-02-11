@@ -13,31 +13,40 @@ bull_market_long: "2010-01-01 - 2020-01-01"
 
 Evidence for hypotheses and baseline: [HYPOTHESIS_TEST_RESULTS.md](HYPOTHESIS_TEST_RESULTS.md).
 Current baseline: [configs/baseline.yaml](configs/baseline.yaml).
+Completed grid searches: [configs/archived/](configs/archived/).
 
 ---
 
 ## Next Steps (Priority Order)
 
-### High Priority – Fine-Tuning New Champion (w10)
+### High Priority
 
-Following breakthrough: w10 with optimized weights achieves 1949.5% alpha (1830 trades, 60.2% win, 2008-2012 DJIA). Key insight: MTF weight is THE dominant factor.
+- **Robustness validation across periods:** Walk-forward on 2012-2016, 2016-2020, 2020-2024, and full period 2008-2024. Verify strategy isn't overfitted to 2008-2012 crisis period.
 
-- **Push MTF weight higher:** Test mtf weights: 0.30, 0.35, 0.40 with compensating adjustments to rsi/ema/macd. Current best: mtf=0.25, rsi=0.60. Explore if even higher MTF improves further.
+- **Further MTF period exploration:** Since 4w dramatically outperforms 6w, test even shorter: 3w (21 days), 2w (14 days), 1w (7 days). May find optimal shorter period.
 
-- **Consider pure RSI+MTF strategy:** Since EMA/MACD contribution is minimal (0.075 each in w10), test indicator_weights with only rsi+mtf (e.g., rsi=0.75, mtf=0.25 or rsi=0.70, mtf=0.30). Simplify if possible.
+- **Push MTF weight higher:** Test mtf weights: 0.30, 0.35, 0.40 with compensating adjustments to rsi/ema/macd. Current best: 
+mtf=0.25, rsi=0.60. Explore if even higher MTF improves further.
 
-- **Position sizing sweep on w10 base:** Test position sizes: 5%, 10%, 15%, 20%. Current: 10%. Monitor exposure (keep < 90%). Find optimal risk/reward.
+- **Higher MTF weight testing:** Since MTF 4w is so powerful, test higher weights: 0.30, 0.35, 0.40 with compensating rsi/ema/macd adjustments. Current: mtf=0.25, rsi=0.60.
 
-- **Fine-tune base parameters on w10:** Elliott Wave confidence (0.60, 0.65, 0.70), risk/reward (2.0, 2.5, 3.0), weekly EMA period (6, 8, 10 weeks).
+- **Risk/reward fine-tuning:** Test intermediate values around 3.0 sweet spot: 2.6, 2.7, 2.8, 2.9, 3.1, 3.2, 3.3, 3.4. Find exact optimal ratio.
 
-- **Robustness validation on w10:** Walk-forward on 2012-2016, 2016-2020, 2020-2024. Verify strategy holds across different market regimes. Out-of-sample validation.
+- **Max positions analysis:** Current defaults to 1 in PortfolioSimulator. Since MTF 4w increases opportunities (64.85% win rate), test max_positions: 3, 5, 10, unlimited. Monitor exposure (keep < 90%).
 
-- **restructure signals configuration**: Use a single configuration for indicators. If an indicator should be used, it has to be configured; if it's missing, it's not used. A minimal configuration contains at least a weight for the indicator and the necessary parameters. Filtering is via weighted score or min_confirmations/min_certainty.
+- **Dynamic position sizing:** Explore volatility-based sizing (reduce in high vol), confidence-based sizing (increase for high confidence signals), Kelly criterion.
 
-  - This might affect the structure of this repo. From my understanding, the elliot wave config is used to generate signals. These are then filtered by the signal/indicator configuration. And then, based on those results, and other criteria, the position size is calculated. Only then, the trade is executed. Please create a flow diagram of the current process, vs this one. Note down pros and cons if there are differences.
+- **Allow multiple indicator configs in parallel:** For example 0.3 x mtf 4 weeks + 0.1 x mtf 8 weeks. Ensemble approach.
 
-- **asset analysis pt 2:**
+- **improve candidate filtering:** add description of asset/company. Fill gaps or remove those candidates. add some trading data like OHLCV etc, also export to same csv.
 
+- **Consider pure RSI+MTF strategy:** Since EMA/MACD contribution is minimal (0.075 each), test indicator_weights with only rsi+mtf (e.g., rsi=0.75, mtf=0.25 or rsi=0.70, mtf=0.30). Simplify if possible.
+
+- **Restructure signals configuration:** Use a single configuration for indicators. If an indicator should be used, it has to be configured; if it's missing, it's not used. A minimal configuration contains at least a weight for the indicator and the necessary parameters. Filtering is via weighted score or min_confirmations/min_certainty.
+
+### High Priority – Asset Analysis & Data
+
+- **Asset analysis pt 2:**
   - Backtest scoring: run per-instrument backtest (e.g. baseline single-instrument), rank by return/Sharpe; optional flag (e.g. --backtest-score).
   - improve candidate filtering: add description of asset/company. fill gaps or remove those candidates. add some trading data like OHLCV etc, also export to same csv.
 
@@ -57,7 +66,7 @@ Following breakthrough: w10 with optimized weights achieves 1949.5% alpha (1830 
 - **Indicator usage beyond confirmation:** Extend weighting to risk/stop-loss or other metrics (confirmation weighting already in baseline).
 
 - **Hypothesis: Signal quality on full period (2000–2020):** Same signal_quality / conf×cert configs with start 2000, end 2020; confirm optimal min_certainty / min_confirmations over longer span.
-- **Hypothesis: Multi-instrument with min_certainty:** Compare different values of. For example min_certainty 0.5 / 0.66; does selectivity improve multi-instrument results?
+- **Hypothesis: Multi-instrument with min_certainty:** Compare different values. For example min_certainty 0.5 / 0.66; does selectivity improve multi-instrument results?
 
 ### Medium Priority – Config and code quality
 

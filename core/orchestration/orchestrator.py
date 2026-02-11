@@ -103,6 +103,7 @@ def run_task(task_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             result_path=Path(payload["result_path"]),
             output_dir=Path(payload["output_dir"]),
             data_root=Path(payload["data_root"]) if payload.get("data_root") else None,
+            config_yaml_path=Path(payload["config_yaml_path"]) if payload.get("config_yaml_path") else None,
         )
         return {"output_dir": str(out)}
     if task_type == "grid_report":
@@ -374,6 +375,7 @@ def build_single_eval_task_graph(
     output_dir: Path,
     config: Any,
     config_id: str = None,
+    config_yaml_path: Path = None,
 ) -> TaskGraph:
     """
     Build TaskGraph for single evaluation: Indicators → Signals → Simulation → Outputs.
@@ -385,6 +387,7 @@ def build_single_eval_task_graph(
         output_dir: Output directory for results
         config: Strategy config
         config_id: Config identifier (default: config.name)
+        config_yaml_path: Optional path to original YAML config file (will be copied to output_dir with timestamp)
         
     Returns:
         TaskGraph with all tasks and dependencies
@@ -550,6 +553,10 @@ def build_single_eval_task_graph(
         "output_dir": str(output_dir),
         "data_root": str(workspace_root),
     }
+    
+    # Add config YAML path to payload if provided
+    if config_yaml_path is not None:
+        out_payload["config_yaml_path"] = str(config_yaml_path)
     
     out_fingerprint = compute_fingerprint("outputs", out_payload, [sim_fingerprint])
     
@@ -720,6 +727,10 @@ def build_grid_search_task_graph(
             "output_dir": str(output_dir),
             "data_root": str(workspace_root),
         }
+        
+        # Add config YAML path to payload if available from _yaml_path attribute
+        if getattr(config, "_yaml_path", None) is not None:
+            out_payload["config_yaml_path"] = str(config._yaml_path)
         
         out_fingerprint = compute_fingerprint("outputs", out_payload, [sim_fingerprint])
         

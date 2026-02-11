@@ -76,7 +76,7 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
     costs = config_dict.get('costs', {})
     
     # Build StrategyConfig
-    return StrategyConfig(
+    config = StrategyConfig(
         name=name,
         description=description,
         
@@ -177,6 +177,11 @@ def load_config_from_yaml(yaml_path: Union[str, Path]) -> StrategyConfig:
         start_date=data_params.get('start_date'),
         end_date=data_params.get('end_date'),
     )
+    
+    # Store original YAML path as attribute for later reference (e.g., copying to results)
+    config._yaml_path = Path(yaml_path).resolve()
+    
+    return config
 
 
 def save_config_to_yaml(config: StrategyConfig, yaml_path: Union[str, Path]):

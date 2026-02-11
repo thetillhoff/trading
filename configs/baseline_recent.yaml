@@ -56,5 +56,5 @@ evaluation:
   initial_capital: 10000 # starting portfolio capital (default 10k)
 
 data:
-  start_date: '2008-01-01'
-  end_date: '2012-01-01'
+  start_date: '2024-01-01'
+  end_date: '2026-01-01'
