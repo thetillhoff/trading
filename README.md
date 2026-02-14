@@ -14,6 +14,7 @@ This project provides a complete toolkit for:
 - **Unified Indicators**: RSI, EMA, MACD, and Elliott Wave (all treated as indicators)
 - **Trading Signals**: Configurable signal generation from any combination of indicators
 - **Walk-Forward Evaluation**: Day-by-day backtesting (never uses future data)
+- **Daily Recommendations**: Get the best trade opportunity based on latest market data
 - **Grid Search**: Systematic parameter and strategy comparison
 - **Visualization**: Charts and CSV reports for analysis
 
@@ -27,6 +28,9 @@ make help
 # One-time: download baseline data (S&P 500), then run evaluation
 make download-baseline
 make evaluate
+
+# Get today's best trade recommendation
+make recommend
 
 # Download top 100 instrument candidates from ~500 available
 make asset-analysis ARGS='--all-assets --fetch-metadata --analyze --top 100'
@@ -72,6 +76,7 @@ Unified command-line interface for all operations:
 
 - `make download` - Download market data
 - `make evaluate` - Run strategy evaluation (defaults to `configs/baseline.yaml`, auto-generates charts)
+- `make recommend` - Get today's best trade recommendation across all baseline instruments
 - `make grid-search` - Compare multiple strategies from `configs/` (auto-parallel, auto-charts). Use `--output-dir` to direct outputs (e.g. when driving multi-period runs).
 - `make hypothesis-tests` - Multi-period hypothesis tests via `cli.hypothesis`: grid-search per period (category/period selectable), then runs CSV-based analysis on the results dir and writes `analysis_report.md` plus aggregated CSVs there. To run analysis only on an existing dir: `make grid-search ARGS='--analyze results/hypothesis_tests_YYYYMMDD/'`.
 

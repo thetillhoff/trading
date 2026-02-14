@@ -20,6 +20,34 @@ Completed grid searches: [configs/archived/](configs/archived/).
 
 ### High Priority
 
+Week 1: IBKR API Integration
+Install ib_insync library (Python wrapper for IBKR API)
+Create cli/auto_trade.py - automated trade executor
+Connect to paper trading account
+Implement basic: connect, get account info, get positions
+Week 2: Order Execution
+Implement bracket order placement from recommendation
+Add position monitoring
+Test paper trading with real signals from make recommend
+Verify orders execute correctly
+Week 3: Error Handling & Safety
+Add order validation (price limits, position sizing)
+Implement error recovery (network failures, rejected orders)
+Add logging and alerts
+Paper trade for full week, fix any bugs
+Week 4: Go Live (Carefully)
+Switch to live account
+Start with 10-20% position sizes
+Monitor closely for first 5-10 trades
+Document any issues and improve
+Benefits:
+By week 5: Fully automated trading running
+Zero manual work except reviewing results
+Consistent execution (no emotion, no mistakes)
+Scalable (handle 5-10 positions easily)
+
+- **Algorithmic detection of overfitting:** Verify that the strategy is not overfitting to the data. There are multiple ways to do this.
+
 - **Robustness validation across periods:** Walk-forward on 2012-2016, 2016-2020, 2020-2024, and full period 2008-2024. Verify strategy isn't overfitted to 2008-2012 crisis period.
 
 - **Further MTF period exploration:** Since 4w dramatically outperforms 6w, test even shorter: 3w (21 days), 2w (14 days), 1w (7 days). May find optimal shorter period.
