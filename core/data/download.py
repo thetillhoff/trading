@@ -114,9 +114,9 @@ def download_instrument(
                 
                 # Cache exists but needs update
                 if not is_fresh:
-                    # Incremental update: download only missing days
-                    print(f"Updating {name} cache (last: {cached_end.date()})...")
-                    update_start = cached_end + pd.Timedelta(days=1)
+                    # Incremental update: re-download from last date to ensure completeness (handles intraday data)
+                    print(f"Updating {name} cache (re-downloading from {cached_end.date()} to get final prices)...")
+                    update_start = cached_end
                     
                     try:
                         df_new = yf.download(ticker, start=update_start.strftime('%Y-%m-%d'), progress=False)
@@ -226,8 +226,8 @@ def download_ticker(
                 if covers_start and is_fresh:
                     return (df_cached, True)
                 if not is_fresh:
-                    # Stale: try incremental update (one network call)
-                    update_start = cached_end + pd.Timedelta(days=1)
+                    # Stale: try incremental update from last date (ensures intraday data gets final prices)
+                    update_start = cached_end
                     try:
                         df_new = yf.download(ticker, start=update_start.strftime("%Y-%m-%d"), progress=False)
                         if not df_new.empty:

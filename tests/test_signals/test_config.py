@@ -77,9 +77,29 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match="min_certainty must be in"):
             StrategyConfig(name="bad", min_certainty=1.5)
 
-    def test_multi_timeframe_weekly_ema_period_must_be_at_least_one(self):
-        with pytest.raises(ValueError, match="multi_timeframe_weekly_ema_period must be >= 1"):
-            StrategyConfig(name="bad", multi_timeframe_weekly_ema_period=0)
+    def test_mtf_ensemble_period_must_be_at_least_one(self):
+        with pytest.raises(ValueError, match="period must be >= 1"):
+            StrategyConfig(
+                name="bad",
+                indicator_weights={"mtf": [{"period": 0, "weight": 0.25}]}
+            )
+    
+    def test_mtf_ensemble_weight_must_be_positive(self):
+        with pytest.raises(ValueError, match="weight must be > 0"):
+            StrategyConfig(
+                name="bad",
+                indicator_weights={"mtf": [{"period": 4, "weight": 0}]}
+            )
+    
+    def test_mtf_ensemble_no_duplicate_periods(self):
+        with pytest.raises(ValueError, match="duplicate period"):
+            StrategyConfig(
+                name="bad",
+                indicator_weights={"mtf": [
+                    {"period": 4, "weight": 0.25},
+                    {"period": 4, "weight": 0.1}
+                ]}
+            )
 
     def test_min_confirmations_must_be_non_negative(self):
         with pytest.raises(ValueError, match="min_confirmations must be >= 0"):

@@ -62,11 +62,28 @@ def run_data_task(
     ddir = data_dir(root)
     ddir.mkdir(parents=True, exist_ok=True)
     manifest_path = prep_manifest_path(root)
+    
+    # Compute data fingerprint based on what was prepared (for cross-run caching)
+    import hashlib
+    import json
+    data_fp_input = {
+        "instruments": sorted(prep_result.instruments),
+        "start_date": prep_result.start_date.strftime("%Y-%m-%d") if prep_result.start_date else None,
+        "end_date": prep_result.end_date.strftime("%Y-%m-%d") if prep_result.end_date else None,
+        "load_start": prep_result.load_start.strftime("%Y-%m-%d") if prep_result.load_start else None,
+        "min_history_days": min_history_days,
+        "column": column,
+    }
+    data_fingerprint = hashlib.sha256(
+        json.dumps(data_fp_input, sort_keys=True).encode()
+    ).hexdigest()[:16]
+    
     manifest = {
         "prep": prep_result,
         "column": column,
         "lookback_days": lookback_days,
         "step_days": step_days,
+        "data_fingerprint": data_fingerprint,
     }
     with open(manifest_path, "wb") as f:
         pickle.dump(manifest, f)

@@ -6,7 +6,7 @@ All indicators (RSI, EMA, MACD, Elliott Wave) are treated equally.
 Config validation runs at construction time (fail fast with clear errors).
 """
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union, Any
 
 from ..shared.defaults import (
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
@@ -25,6 +25,38 @@ from ..shared.defaults import (
 )
 
 
+def _validate_mtf_ensemble(mtf_configs: List[Dict[str, Union[int, float]]]) -> None:
+    """Validate MTF ensemble configuration. Raises ValueError on failure."""
+    if not mtf_configs:
+        raise ValueError("MTF ensemble list cannot be empty")
+    
+    periods_seen = set()
+    for i, cfg in enumerate(mtf_configs):
+        if not isinstance(cfg, dict):
+            raise ValueError(f"MTF config at index {i} must be a dict, got {type(cfg).__name__}")
+        
+        if 'period' not in cfg:
+            raise ValueError(f"MTF config at index {i} missing required 'period' key")
+        if 'weight' not in cfg:
+            raise ValueError(f"MTF config at index {i} missing required 'weight' key")
+        
+        period = cfg['period']
+        weight = cfg['weight']
+        
+        if not isinstance(period, int):
+            raise ValueError(f"MTF config at index {i}: period must be int, got {type(period).__name__}")
+        if period < 1:
+            raise ValueError(f"MTF config at index {i}: period must be >= 1, got {period}")
+        if period in periods_seen:
+            raise ValueError(f"MTF config at index {i}: duplicate period {period}")
+        periods_seen.add(period)
+        
+        if not isinstance(weight, (int, float)):
+            raise ValueError(f"MTF config at index {i}: weight must be numeric, got {type(weight).__name__}")
+        if weight <= 0:
+            raise ValueError(f"MTF config at index {i}: weight must be > 0, got {weight}")
+
+
 def _validate_config(
     *,
     ema_short_period: int,
@@ -37,13 +69,8 @@ def _validate_config(
     min_wave_size: Optional[float] = None,
     min_certainty: Optional[float] = None,
     min_confirmations: Optional[int] = None,
-    multi_timeframe_weekly_ema_period: Optional[int] = None,
 ) -> None:
     """Validate indicator and risk parameters. Raises ValueError with clear message on failure."""
-    if multi_timeframe_weekly_ema_period is not None and multi_timeframe_weekly_ema_period < 1:
-        raise ValueError(
-            f"multi_timeframe_weekly_ema_period must be >= 1, got {multi_timeframe_weekly_ema_period}"
-        )
     if ema_short_period >= ema_long_period:
         raise ValueError(
             f"EMA short_period ({ema_short_period}) must be less than long_period ({ema_long_period})"
@@ -111,8 +138,9 @@ class SignalConfig:
     min_certainty: Optional[float] = None  # Require effective certainty >= this 0-1 (None = no filter)
     use_trend_filter: bool = USE_TREND_FILTER  # Only trade in direction of EMA trend
 
-    # Optional per-indicator weights for confirmation (rsi, ema, macd; optional mtf when use_multi_timeframe). If None, equal weight.
-    indicator_weights: Optional[Dict[str, float]] = None
+    # Optional per-indicator weights for confirmation (rsi, ema, macd).
+    # For mtf: can be list of dicts [{period: int, weight: float}, ...] for ensemble
+    indicator_weights: Optional[Dict[str, Union[float, List[Dict[str, Union[int, float]]]]]] = None
 
     # Regime detection (must match StrategyConfig when built from it in walk_forward)
     use_regime_detection: bool = False
@@ -129,8 +157,7 @@ class SignalConfig:
 
     # Multi-timeframe: confirm daily signals with weekly trend (weekly close vs weekly EMA)
     use_multi_timeframe: bool = False
-    multi_timeframe_weekly_ema_period: int = 8  # weeks
-    # When True, drop signals that fail MTF check. When False, MTF only contributes to confirmation_score if indicator_weights has "mtf".
+    # When True, drop signals that fail MTF check. When False, MTF only contributes to confirmation_score.
     use_multi_timeframe_filter: bool = True
 
     def __post_init__(self) -> None:
@@ -145,8 +172,12 @@ class SignalConfig:
             min_wave_size=self.min_wave_size,
             min_certainty=self.min_certainty,
             min_confirmations=self.min_confirmations,
-            multi_timeframe_weekly_ema_period=self.multi_timeframe_weekly_ema_period,
         )
+        # Validate MTF ensemble if present
+        if self.indicator_weights and 'mtf' in self.indicator_weights:
+            mtf_value = self.indicator_weights['mtf']
+            if isinstance(mtf_value, list):
+                _validate_mtf_ensemble(mtf_value)
 
 
 @dataclass
@@ -191,8 +222,9 @@ class StrategyConfig:
     min_confirmations: Optional[int] = None  # Require at least N indicator confirmations (None = no filter)
     min_certainty: Optional[float] = None  # Require effective certainty >= this 0-1 (None = no filter)
 
-    # Optional per-indicator weights for confirmation (rsi, ema, macd; optional mtf when use_multi_timeframe). If None, equal weight.
-    indicator_weights: Optional[Dict[str, float]] = None
+    # Optional per-indicator weights for confirmation (rsi, ema, macd).
+    # For mtf: can be list of dicts [{period: int, weight: float}, ...] for ensemble
+    indicator_weights: Optional[Dict[str, Union[float, List[Dict[str, Union[int, float]]]]]] = None
 
     # Target/stop-loss parameters (from shared.defaults)
     risk_reward: float = RISK_REWARD_RATIO
@@ -251,8 +283,7 @@ class StrategyConfig:
 
     # Multi-timeframe: confirm daily signals with weekly trend (weekly close vs weekly EMA)
     use_multi_timeframe: bool = False
-    multi_timeframe_weekly_ema_period: int = 8  # weeks
-    use_multi_timeframe_filter: bool = True  # When False, MTF is indicator-only (weight in indicator_weights.mtf), no drop
+    use_multi_timeframe_filter: bool = True  # When False, MTF only contributes to confirmation_score
 
     # Market regime detection and adaptive signals
     use_regime_detection: bool = False  # Enable market regime detection (ADX + MA slope)
@@ -294,8 +325,12 @@ class StrategyConfig:
             min_wave_size=self.min_wave_size,
             min_certainty=self.min_certainty,
             min_confirmations=self.min_confirmations,
-            multi_timeframe_weekly_ema_period=self.multi_timeframe_weekly_ema_period,
         )
+        # Validate MTF ensemble if present
+        if self.indicator_weights and 'mtf' in self.indicator_weights:
+            mtf_value = self.indicator_weights['mtf']
+            if isinstance(mtf_value, list):
+                _validate_mtf_ensemble(mtf_value)
 
 
 # Current best baseline configuration

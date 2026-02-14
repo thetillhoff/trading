@@ -435,15 +435,20 @@ class TestFilterSignalsByQuality:
         assert len(result) == 2
 
 
-def _mtf_config(use_multi_timeframe: bool, multi_timeframe_weekly_ema_period: int = 8):
-    """SignalConfig with multi-timeframe on/off and optional weekly EMA period."""
+def _mtf_config(use_multi_timeframe: bool, mtf_period: int = 8, mtf_weight: float = 0.25):
+    """SignalConfig with multi-timeframe on/off and optional MTF ensemble config."""
+    indicator_weights = None
+    if use_multi_timeframe:
+        indicator_weights = {
+            "mtf": [{"period": mtf_period, "weight": mtf_weight}]
+        }
     return SignalConfig(
         use_elliott_wave=False,
         use_rsi=False,
         use_ema=False,
         use_macd=False,
         use_multi_timeframe=use_multi_timeframe,
-        multi_timeframe_weekly_ema_period=multi_timeframe_weekly_ema_period,
+        indicator_weights=indicator_weights,
     )
 
 
@@ -485,7 +490,7 @@ class TestMultiTimeframeFilter:
         signal_ts = last_week_end - pd.Timedelta(days=2)
         if signal_ts not in data.index:
             signal_ts = data.index[data.index <= signal_ts][-1]
-        config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=period)
+        config = _mtf_config(use_multi_timeframe=True, mtf_period=period)
         detector = SignalDetector(config)
         signals = [TradingSignal(SignalType.BUY, signal_ts, float(data.loc[signal_ts]), 0.8, reasoning="x")]
         result = detector._filter_signals_by_multi_timeframe(signals, data)
@@ -517,7 +522,7 @@ class TestMultiTimeframeFilter:
         signal_ts = last_week_end - pd.Timedelta(days=1)
         if signal_ts not in data.index:
             signal_ts = data.index[data.index <= last_week_end][-1]
-        config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=period)
+        config = _mtf_config(use_multi_timeframe=True, mtf_period=period)
         detector = SignalDetector(config)
         signals = [TradingSignal(SignalType.BUY, signal_ts, float(data.loc[signal_ts]), 0.8, reasoning="x")]
         result = detector._filter_signals_by_multi_timeframe(signals, data)
@@ -538,7 +543,7 @@ class TestMultiTimeframeFilter:
                 signal_ts = week_end - pd.Timedelta(days=1)
                 if signal_ts not in data.index:
                     signal_ts = data.index[data.index <= week_end][-1]
-                config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=period)
+                config = _mtf_config(use_multi_timeframe=True, mtf_period=period)
                 detector = SignalDetector(config)
                 signals = [TradingSignal(SignalType.SELL, signal_ts, float(data.loc[signal_ts]), 0.8, reasoning="y")]
                 result = detector._filter_signals_by_multi_timeframe(signals, data)
@@ -549,7 +554,7 @@ class TestMultiTimeframeFilter:
 
     def test_insufficient_weekly_data_returns_all_signals(self):
         """When weekly bars are fewer than period, filter returns signals unchanged (no filter)."""
-        config = _mtf_config(use_multi_timeframe=True, multi_timeframe_weekly_ema_period=8)
+        config = _mtf_config(use_multi_timeframe=True, mtf_period=8)
         detector = SignalDetector(config)
         # Only 3 weeks of daily data -> 3 weekly bars < 8
         data = pd.Series(
@@ -559,6 +564,77 @@ class TestMultiTimeframeFilter:
         signals = [TradingSignal(SignalType.BUY, data.index[10], 101.0, 0.8, reasoning="x")]
         result = detector._filter_signals_by_multi_timeframe(signals, data)
         assert len(result) == 1
+
+
+class TestMTFEnsemble:
+    """Tests for MTF ensemble (multiple periods)."""
+    
+    def test_mtf_ensemble_basic_two_periods(self):
+        """MTF ensemble with two periods (4w + 8w) computes confirmations correctly."""
+        config = SignalConfig(
+            use_elliott_wave=True,
+            use_rsi=True,
+            use_ema=True,
+            use_macd=True,
+            use_multi_timeframe=True,
+            use_multi_timeframe_filter=False,
+            indicator_weights={
+                "rsi": 0.6,
+                "ema": 0.1,
+                "macd": 0.05,
+                "mtf": [
+                    {"period": 4, "weight": 0.25},
+                    {"period": 8, "weight": 0.15},
+                ]
+            },
+        )
+        detector = SignalDetector(config)
+        # Create data with clear uptrend
+        n = 16 * 7
+        data = pd.Series(
+            100.0 + np.arange(n) * 0.5,
+            index=pd.date_range("2020-01-01", periods=n, freq="D"),
+        )
+        # Generate signals using detect_signals_with_indicators
+        signals, indicator_df, _ = detector.detect_signals_with_indicators(data)
+        # Check that mtf_confirms is set
+        if signals:
+            assert all(s.mtf_confirms is not None for s in signals), "MTF ensemble should set mtf_confirms"
+    
+    def test_mtf_ensemble_weighted_majority(self):
+        """MTF ensemble uses weighted majority for mtf_confirms."""
+        # Test case where 4w confirms (0.25 weight) but 8w doesn't (0.05 weight)
+        # Weighted majority: 0.25 / 0.30 = 83% > 50% => mtf_confirms = True
+        config = SignalConfig(
+            use_elliott_wave=False,
+            use_rsi=False,
+            use_ema=False,
+            use_macd=False,
+            use_multi_timeframe=True,
+            use_multi_timeframe_filter=False,
+            indicator_weights={
+                "mtf": [
+                    {"period": 4, "weight": 0.25},
+                    {"period": 8, "weight": 0.05},
+                ]
+            },
+        )
+        detector = SignalDetector(config)
+        # Data where 4w EMA shows uptrend but 8w is more neutral
+        n = 16 * 7
+        np.random.seed(42)
+        daily = 100.0 + np.concatenate([
+            np.linspace(0, 10, n//2),  # slow rise
+            np.linspace(10, 20, n//2),  # steeper rise (4w will catch this)
+        ])
+        data = pd.Series(daily, index=pd.date_range("2020-01-01", periods=n, freq="D"))
+        signals, _, _ = detector.detect_signals_with_indicators(data)
+        # Weighted majority should confirm for BUY signals in uptrend
+        buy_signals = [s for s in signals if s.signal_type == SignalType.BUY]
+        if buy_signals:
+            # At least some should be confirmed (weighted majority)
+            confirmed = [s for s in buy_signals if s.mtf_confirms]
+            assert len(confirmed) > 0, "Some BUY signals should be confirmed by weighted MTF"
 
 
 class TestVectorizedOptimizationsAccuracy:
@@ -606,7 +682,12 @@ class TestVectorizedOptimizationsAccuracy:
             use_macd=True,
             use_multi_timeframe=True,
             use_multi_timeframe_filter=False,
-            indicator_weights={"rsi": 0.4, "ema": 0.2, "macd": 0.2, "mtf": 0.2}
+            indicator_weights={
+                "rsi": 0.4,
+                "ema": 0.2,
+                "macd": 0.2,
+                "mtf": [{"period": 8, "weight": 0.2}]
+            }
         )
         
         detector = SignalDetector(config)

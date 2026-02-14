@@ -106,6 +106,41 @@ make backtest
 make backtest-compare
 ```
 
+## Caching
+
+The system uses two levels of caching to accelerate repeated runs:
+
+### Indicator Cache
+
+Technical indicators (RSI, EMA, MACD, Elliott Wave) are cached on disk at `~/.cache/trading/indicators/`. This cache persists across all runs and workspaces, avoiding recomputation of expensive indicator calculations when analyzing the same data.
+
+### Task Orchestration Cache
+
+Grid searches and evaluations use content-addressable caching at `~/.cache/trading/orchestration/`. When you run the same configuration multiple times, all tasks (indicators, signals, simulation) are cached and reused.
+
+**Performance example** (9 configs × 1 instrument):
+- First run: ~22 minutes
+- Subsequent identical runs: <1 second (1463x speedup)
+
+**Cache cleanup** (if needed):
+
+```bash
+# Clear indicator cache
+rm -rf ~/.cache/trading/indicators/
+
+# Clear orchestration cache
+rm -rf ~/.cache/trading/orchestration/
+
+# Clear both
+rm -rf ~/.cache/trading/
+```
+
+**How it works:**
+- Tasks are fingerprinted based on their inputs (config, instruments, date ranges, parameters)
+- Workspace paths are excluded from fingerprints, enabling cache reuse across grid searches
+- Cache is automatically checked before each task executes
+- Cached results are loaded instantly instead of recomputing
+
 ## Documentation
 
 - **[DEVELOPMENT.md](DEVELOPMENT.md)**: Development history and design decisions

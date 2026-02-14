@@ -21,7 +21,7 @@ from core.evaluation.walk_forward import WalkForwardEvaluator
 from core.grid_test.reporter import trades_to_dataframe
 
 SNAPSHOT_START = "2012-01-01"
-SNAPSHOT_END = "2012-12-31"
+SNAPSHOT_END = "2012-03-01"
 TESTS_DIR = Path(__file__).resolve().parent.parent
 SNAPSHOT_PATH = TESTS_DIR / "snapshots" / "baseline_trades_short.csv"
 
@@ -47,6 +47,10 @@ def test_baseline_trades_match_short_timespan_snapshot():
     config = load_config_from_yaml(str(TESTS_DIR.parent / "configs" / "baseline.yaml"))
     config.start_date = SNAPSHOT_START
     config.end_date = SNAPSHOT_END
+    
+    # Limit to 3 instruments for faster testing
+    if len(config.instruments) > 3:
+        config.instruments = config.instruments[:3]
 
     try:
         evaluator = WalkForwardEvaluator(

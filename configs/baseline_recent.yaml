@@ -1,5 +1,5 @@
-name: baseline-all-instruments
-description: Current best multi-instrument baseline. Updated Feb 2026 with grid search results.
+name: baseline-recent
+description: Baseline for recent period (2024-2026). Updated Feb 2026 with grid search results.
 
 indicators:
   elliott_wave:
@@ -31,12 +31,13 @@ signals:
   use_trend_filter: false # gate entries by trend (rejected in tests)
   use_multi_timeframe: true # confirm daily signals with weekly trend; MTF as soft indicator
   use_multi_timeframe_filter: false # MTF contributes to confirmation score (not hard filter)
-  multi_timeframe_weekly_ema_period: 4 # weeks; optimal from MTF grid (+81% vs 8w)
-  indicator_weights: # weights for confirmation score including MTF
+  indicator_weights: # weights for confirmation score including MTF (4w period optimal from grid)
     rsi: 0.6
     ema: 0.075
     macd: 0.075
-    mtf: 0.25
+    mtf:
+      - period: 4 # weeks
+        weight: 0.25
 
 regime:
   use_regime_detection: false # ADX/trend regime (rejected in tests)
@@ -56,5 +57,5 @@ evaluation:
   initial_capital: 10000 # starting portfolio capital (default 10k)
 
 data:
-  start_date: '2024-01-01'
-  end_date: '2026-01-01'
+  start_date: '2008-01-01'
+  end_date: '2012-01-01'

@@ -182,56 +182,120 @@ class SignalDetector:
         # Set MTF confirmation per signal and compute confirmation scores in single pass
         t0_mtf = time.perf_counter()
         if getattr(self.config, "use_multi_timeframe", False):
-            period = max(1, getattr(self.config, "multi_timeframe_weekly_ema_period", 8))
-            weekly = data.resample("W").last()
-            weekly_ema = weekly.ewm(span=period, min_periods=period).mean() if len(weekly) >= period else None
+            weights = getattr(self.config, "indicator_weights", None)
+            mtf_configs = weights.get("mtf") if weights else None
             
-            # Pre-compute MTF confirmation lookup for all weekly periods
-            mtf_lookup = {}
-            if weekly_ema is not None:
+            if mtf_configs and isinstance(mtf_configs, list):
+                # #region agent log
+                import sys
+                mem_before = sys.getsizeof(data) if hasattr(sys, 'getsizeof') else -1
+                with open('/app/debug.log', 'a') as f:
+                    import json, time as time_mod
+                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_A","timestamp":int(time_mod.time()*1000),"location":"detector.py:189","message":"MTF ensemble start","data":{"mem_before_mb":mem_before/(1024*1024),"num_mtf_configs":len(mtf_configs),"data_len":len(data),"signal_count":len(signals)},"runId":"debug1","hypothesisId":"A,E"})+'\n')
+                # #endregion
+                # MTF ensemble: compute multiple EMAs
+                weekly = data.resample("W").last()
+                
+                # Compute weekly EMAs for each period
+                weekly_emas = {}
+                for cfg in mtf_configs:
+                    period = cfg['period']
+                    if len(weekly) >= period:
+                        weekly_emas[period] = weekly.ewm(span=period, min_periods=period).mean()
+                
+                # #region agent log
+                with open('/app/debug.log', 'a') as f:
+                    import json, time as time_mod, sys
+                    ema_sizes = {p: sys.getsizeof(s) if hasattr(sys, 'getsizeof') else -1 for p, s in weekly_emas.items()}
+                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_B","timestamp":int(time_mod.time()*1000),"location":"detector.py:202","message":"Weekly EMAs computed","data":{"weekly_len":len(weekly),"num_emas":len(weekly_emas),"ema_sizes_kb":{k:v/1024 for k,v in ema_sizes.items()}},"runId":"debug1","hypothesisId":"D"})+'\n')
+                # #endregion
+                
+                # Pre-compute ensemble MTF confirmations for all weekly periods
+                # Note: Keep only confirmation booleans, not full config dicts, to reduce memory
+                mtf_ensemble_lookup = {}
                 for week_idx in weekly.index:
                     w_close = weekly.loc[week_idx]
-                    w_ema = weekly_ema.loc[week_idx]
-                    if not pd.isna(w_close) and not pd.isna(w_ema):
-                        mtf_lookup[week_idx] = {
-                            'buy_confirmed': w_close >= w_ema,
-                            'sell_confirmed': w_close <= w_ema
-                        }
-            
-            # Check if we need to compute confirmation scores
-            weights = getattr(self.config, "indicator_weights", None)
-            compute_scores = (weights and "mtf" in weights and indicator_df is not None)
-            
-            # Single pass: set mtf_confirms and confirmation_score
-            for s in signals:
-                # Get MTF confirmation
-                week_end = s.timestamp.to_period("W").end_time
-                idx = weekly.index.get_indexer([week_end], method="ffill")[0]
-                if idx >= 0:
-                    week_idx = weekly.index[idx]
-                    if week_idx in mtf_lookup:
-                        if s.signal_type == SignalType.BUY:
-                            s.mtf_confirms = mtf_lookup[week_idx]['buy_confirmed']
-                        elif s.signal_type == SignalType.SELL:
-                            s.mtf_confirms = mtf_lookup[week_idx]['sell_confirmed']
+                    if pd.isna(w_close):
+                        continue
+                    
+                    # Store only weights and confirmations (not full config dicts)
+                    confirmations = []
+                    for cfg in mtf_configs:
+                        period = cfg['period']
+                        if period in weekly_emas:
+                            w_ema = weekly_emas[period].loc[week_idx]
+                            if not pd.isna(w_ema):
+                                confirmations.append({
+                                    'weight': cfg['weight'],
+                                    'buy': bool(w_close >= w_ema),
+                                    'sell': bool(w_close <= w_ema),
+                                })
+                    
+                    if confirmations:
+                        mtf_ensemble_lookup[week_idx] = confirmations
                 
-                # Compute confirmation score if weighted indicators are used
-                if compute_scores and s.mtf_confirms is not None:
-                    _, _, _, indicators = self._check_indicator_confirmation(s, indicator_df)
-                    score = confirmation_weighted_score(
-                        indicators,
-                        use_rsi=getattr(self.config, "use_rsi", False),
-                        use_ema=getattr(self.config, "use_ema", False),
-                        use_macd=getattr(self.config, "use_macd", False),
-                        weights=weights,
-                        for_buy=(s.signal_type == SignalType.BUY),
-                        mtf_confirms=s.mtf_confirms,
-                    )
-                    if score is not None:
-                        s.confirmation_score = score
-            
-            # Apply multi-timeframe filter if in filter mode
-            signals = self._filter_signals_by_multi_timeframe(signals, data, weekly=weekly, weekly_ema=weekly_ema)
+                # #region agent log
+                with open('/app/debug.log', 'a') as f:
+                    import json, time as time_mod, sys
+                    lookup_size = sys.getsizeof(mtf_ensemble_lookup) if hasattr(sys, 'getsizeof') else -1
+                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_C","timestamp":int(time_mod.time()*1000),"location":"detector.py:232","message":"MTF lookup built","data":{"lookup_entries":len(mtf_ensemble_lookup),"lookup_size_kb":lookup_size/1024,"avg_confirmations_per_week":sum(len(v) for v in mtf_ensemble_lookup.values())/len(mtf_ensemble_lookup) if mtf_ensemble_lookup else 0},"runId":"debug1","hypothesisId":"C"})+'\n')
+                # #endregion
+                
+                # Single pass: set mtf_confirms (weighted majority) and confirmation_score
+                compute_scores = (indicator_df is not None)
+                for s in signals:
+                    week_end = s.timestamp.to_period("W").end_time
+                    idx = weekly.index.get_indexer([week_end], method="ffill")[0]
+                    if idx >= 0:
+                        week_idx = weekly.index[idx]
+                        if week_idx in mtf_ensemble_lookup:
+                            ensemble = mtf_ensemble_lookup[week_idx]
+                            
+                            # Compute weighted majority for mtf_confirms
+                            is_buy = (s.signal_type == SignalType.BUY)
+                            total_weight = sum(cfg['weight'] for cfg in ensemble)
+                            if is_buy:
+                                confirming_weight = sum(cfg['weight'] for cfg in ensemble if cfg['buy'])
+                            elif s.signal_type == SignalType.SELL:
+                                confirming_weight = sum(cfg['weight'] for cfg in ensemble if cfg['sell'])
+                            else:
+                                confirming_weight = 0
+                            
+                            s.mtf_confirms = (confirming_weight > total_weight / 2) if total_weight > 0 else None
+                            
+                            # Compute confirmation score if indicators are available
+                            if compute_scores:
+                                _, _, _, indicators = self._check_indicator_confirmation(s, indicator_df)
+                                # Build mtf_ensemble for scoring (minimal memory footprint)
+                                mtf_ensemble = [
+                                    {'weight': cfg['weight'], 
+                                     'confirmed': cfg['buy'] if is_buy else cfg['sell']}
+                                    for cfg in ensemble
+                                ]
+                                score = confirmation_weighted_score(
+                                    indicators,
+                                    use_rsi=getattr(self.config, "use_rsi", False),
+                                    use_ema=getattr(self.config, "use_ema", False),
+                                    use_macd=getattr(self.config, "use_macd", False),
+                                    weights=weights,
+                                    for_buy=(s.signal_type == SignalType.BUY),
+                                    mtf_ensemble=mtf_ensemble,
+                                )
+                                if score is not None:
+                                    s.confirmation_score = score
+                
+                # Apply multi-timeframe filter if in filter mode (uses s.mtf_confirms)
+                if getattr(self.config, "use_multi_timeframe_filter", True):
+                    signals = [s for s in signals if s.mtf_confirms]
+                
+                # #region agent log
+                with open('/app/debug.log', 'a') as f:
+                    import json, time as time_mod, sys
+                    mem_after = sys.getsizeof(data) if hasattr(sys, 'getsizeof') else -1
+                    # Check if weekly_emas still exists (not GC'd)
+                    emas_still_exist = 'weekly_emas' in locals()
+                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_D","timestamp":int(time_mod.time()*1000),"location":"detector.py:278","message":"MTF ensemble complete","data":{"mem_after_mb":mem_after/(1024*1024),"signals_after_filter":len(signals),"emas_still_in_scope":emas_still_exist,"lookup_still_in_scope":'mtf_ensemble_lookup' in locals()},"runId":"debug1","hypothesisId":"A,D"})+'\n')
+                # #endregion
         _acc("signal_detection_mtf", time.perf_counter() - t0_mtf)
 
         # Filter by signal type, quality, sort and dedupe
@@ -245,39 +309,6 @@ class SignalDetector:
 
         return signals, indicator_df, all_waves
 
-    def _mtf_confirms_single(
-        self,
-        signal: Signal,
-        data: pd.Series,
-        *,
-        weekly: Optional[pd.Series] = None,
-        weekly_ema: Optional[pd.Series] = None,
-    ) -> Optional[bool]:
-        """
-        Return whether weekly trend confirms this signal (BUY: weekly close >= weekly EMA,
-        SELL: weekly close <= weekly EMA). Returns None if data insufficient or not applicable.
-        When weekly and weekly_ema are provided, uses them (avoids repeated resample/ewm).
-        """
-        if weekly is None or weekly_ema is None:
-            period = max(1, getattr(self.config, "multi_timeframe_weekly_ema_period", 8))
-            weekly = data.resample("W").last()
-            if len(weekly) < period:
-                return None
-            weekly_ema = weekly.ewm(span=period, min_periods=period).mean()
-        week_end = signal.timestamp.to_period("W").end_time
-        idx = weekly.index.get_indexer([week_end], method="ffill")[0]
-        if idx < 0:
-            return None
-        w_close = weekly.iloc[idx]
-        w_ema = weekly_ema.iloc[idx]
-        if pd.isna(w_close) or pd.isna(w_ema):
-            return None
-        if signal.signal_type == SignalType.BUY:
-            return bool(w_close >= w_ema)
-        if signal.signal_type == SignalType.SELL:
-            return bool(w_close <= w_ema)
-        return None
-
     def _filter_signals_by_multi_timeframe(
         self,
         signals: List[Signal],
@@ -289,7 +320,7 @@ class SignalDetector:
         """
         Keep only signals confirmed by weekly trend when use_multi_timeframe_filter is True.
         No-op when use_multi_timeframe is False or use_multi_timeframe_filter is False.
-        When weekly and weekly_ema are provided, uses them (avoids repeated resample/ewm).
+        Supports MTF ensemble (uses weighted majority via s.mtf_confirms if already set).
         """
         if not signals:
             return signals
@@ -297,26 +328,77 @@ class SignalDetector:
             return signals
         if not getattr(self.config, "use_multi_timeframe_filter", True):
             return signals
-        if weekly is None or weekly_ema is None:
-            period = max(1, getattr(self.config, "multi_timeframe_weekly_ema_period", 8))
+        
+        # If mtf_confirms is already set on signals (from detect_signals_with_indicators), use it
+        if signals and signals[0].mtf_confirms is not None:
+            # #region agent log
+            with open('/app/debug.log', 'a') as f:
+                import json, time as time_mod
+                f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_E","timestamp":int(time_mod.time()*1000),"location":"detector.py:313","message":"MTF filter: using pre-computed","data":{"signal_count":len(signals)},"runId":"debug1","hypothesisId":"B"})+'\n')
+            # #endregion
+            return [s for s in signals if s.mtf_confirms]
+        
+        # #region agent log
+        with open('/app/debug.log', 'a') as f:
+            import json, time as time_mod
+            f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_F","timestamp":int(time_mod.time()*1000),"location":"detector.py:340","message":"MTF filter: fallback computation triggered","data":{"signal_count":len(signals),"weekly_provided":weekly is not None},"runId":"debug1","hypothesisId":"B"})+'\n')
+        # #endregion
+        
+        # Fallback: compute MTF on the fly for old detect_signals method or direct filter calls
+        # Get MTF config
+        weights = getattr(self.config, "indicator_weights", None)
+        mtf_configs = weights.get("mtf") if weights else None
+        
+        if not mtf_configs or not isinstance(mtf_configs, list) or len(mtf_configs) == 0:
+            # No MTF config, pass all signals
+            return signals
+        
+        # Compute weekly data if not provided
+        if weekly is None:
             weekly = data.resample("W").last()
-            if len(weekly) < period:
-                return signals
-            weekly_ema = weekly.ewm(span=period, min_periods=period).mean()
+        
+        # Compute weekly EMAs for each period
+        weekly_emas = {}
+        for cfg in mtf_configs:
+            period = cfg['period']
+            if len(weekly) >= period:
+                weekly_emas[period] = weekly.ewm(span=period, min_periods=period).mean()
+        
+        # If no EMAs can be computed (insufficient data), return all signals
+        if not weekly_emas:
+            return signals
+        
+        # Filter signals based on weighted majority
         filtered = []
         for s in signals:
             week_end = s.timestamp.to_period("W").end_time
             idx = weekly.index.get_indexer([week_end], method="ffill")[0]
             if idx < 0:
                 continue
+            
             w_close = weekly.iloc[idx]
-            w_ema = weekly_ema.iloc[idx]
-            if pd.isna(w_close) or pd.isna(w_ema):
+            if pd.isna(w_close):
                 continue
-            if s.signal_type == SignalType.BUY and w_close >= w_ema:
+            
+            # Compute weighted confirmations
+            total_weight = 0.0
+            confirming_weight = 0.0
+            for cfg in mtf_configs:
+                period = cfg['period']
+                weight = cfg['weight']
+                if period in weekly_emas:
+                    w_ema = weekly_emas[period].iloc[idx]
+                    if not pd.isna(w_ema):
+                        total_weight += weight
+                        if s.signal_type == SignalType.BUY and w_close >= w_ema:
+                            confirming_weight += weight
+                        elif s.signal_type == SignalType.SELL and w_close <= w_ema:
+                            confirming_weight += weight
+            
+            # Keep if weighted majority confirms
+            if total_weight > 0 and confirming_weight > total_weight / 2:
                 filtered.append(s)
-            elif s.signal_type == SignalType.SELL and w_close <= w_ema:
-                filtered.append(s)
+        
         return filtered
 
     def _invert_price_data(self, data: pd.Series) -> pd.Series:

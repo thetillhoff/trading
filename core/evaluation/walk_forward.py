@@ -83,7 +83,6 @@ def _signal_config_from_strategy(config: StrategyConfig) -> SignalConfig:
         use_volatility_filter=getattr(config, 'use_volatility_filter', False),
         volatility_max=getattr(config, 'volatility_max', 0.02),
         use_multi_timeframe=getattr(config, 'use_multi_timeframe', False),
-        multi_timeframe_weekly_ema_period=getattr(config, 'multi_timeframe_weekly_ema_period', 8),
         use_multi_timeframe_filter=getattr(config, 'use_multi_timeframe_filter', True),
     )
 

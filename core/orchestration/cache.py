@@ -37,7 +37,7 @@ def compute_fingerprint(
     # Build fingerprint input
     fp_input = {
         "task_type": task_type,
-        "payload": _normalize_payload(payload),
+        "payload": _normalize_payload(payload, task_type),
     }
     
     if dep_fingerprints:
@@ -53,24 +53,49 @@ def compute_fingerprint(
     return h[:16]
 
 
-def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_payload(payload: Dict[str, Any], task_type: str = None) -> Dict[str, Any]:
     """
     Normalize payload for fingerprinting.
     
+    - Exclude workspace-dependent paths (root, data_root, result_path, output_dir, config_path)
+      for all tasks EXCEPT "data" (which must write to specific workspace)
     - Convert Path objects to strings
     - Sort lists where order doesn't matter
     - Handle special cases per task type
+    
+    Workspace-dependent keys are excluded because they change on every run (temp directories)
+    but don't affect task output. This enables caching across grid search runs.
+    
+    Data tasks are special: they write files to the workspace, so they MUST include "root"
+    in their fingerprint to avoid cross-workspace cache hits.
     """
+    # Keys to exclude from fingerprinting (workspace-dependent, don't affect results)
+    # EXCEPT for "data" tasks which need workspace-specific execution
+    EXCLUDED_KEYS = {
+        "root",          # Temp workspace path (e.g., /tmp/grid_search_abc123/)
+        "data_root",     # Temp workspace path
+        "result_path",   # Temp workspace path for intermediate results
+        "output_dir",    # Output directory (doesn't affect computation)
+        "config_path",   # Temp workspace path (use config_id + config fingerprint instead)
+    }
+    
+    # Data tasks need root in their fingerprint (they write files to workspace)
+    if task_type == "data":
+        EXCLUDED_KEYS = {"output_dir"}  # Only exclude output_dir for data tasks
+    
     normalized = {}
     
     for key, value in payload.items():
+        if key in EXCLUDED_KEYS:
+            continue  # Skip workspace-dependent keys
+            
         if isinstance(value, Path):
             normalized[key] = str(value)
         elif isinstance(value, list) and key in ("instruments",):
             # Sort instrument lists for stability
             normalized[key] = sorted(str(v) for v in value)
         elif isinstance(value, dict):
-            normalized[key] = _normalize_payload(value)
+            normalized[key] = _normalize_payload(value, task_type)
         else:
             normalized[key] = value
     

@@ -411,6 +411,7 @@ def build_single_eval_task_graph(
     # Load manifest
     manifest = load_prep_manifest(workspace_root)
     prep = manifest["prep"]
+    data_fingerprint = manifest.get("data_fingerprint", None)
     
     graph = TaskGraph()
     
@@ -429,7 +430,9 @@ def build_single_eval_task_graph(
                 "params": params,
             }
             
-            fingerprint = compute_fingerprint("indicators", payload, [])
+            # Include data fingerprint in dependencies for cache stability across runs
+            deps = [data_fingerprint] if data_fingerprint else []
+            fingerprint = compute_fingerprint("indicators", payload, deps)
             
             node = TaskNode(
                 id=task_id,
@@ -604,11 +607,17 @@ def build_grid_search_task_graph(
     
     manifest = load_prep_manifest(workspace_root)
     prep = manifest["prep"]
+    data_fingerprint = manifest.get("data_fingerprint", None)
     
     graph = TaskGraph()
     
+    import time
+    t_start = time.perf_counter()
+    print(f"  [DEBUG] Starting DAG build for {len(configs)} configs x {len(prep.instruments)} instruments...")
+    
     # Save all configs and collect config fingerprints
     config_fingerprints = {}
+    print(f"  [DEBUG] Saving configs and computing fingerprints...")
     for config in configs:
         staging = config_staging_dir(workspace_root, config.name)
         staging.mkdir(parents=True, exist_ok=True)
@@ -616,11 +625,14 @@ def build_grid_search_task_graph(
         with open(config_pkl, "wb") as f:
             pickle.dump(config, f)
         config_fingerprints[config.name] = compute_config_fingerprint(config_pkl)
+    print(f"  [DEBUG] Config fingerprints computed in {time.perf_counter() - t_start:.2f}s")
     
     # Deduplicated indicator tasks
     seen_indicator = set()
     indicator_tasks_by_key = {}
     
+    t_indicators = time.perf_counter()
+    print(f"  [DEBUG] Building indicator tasks (deduplicated)...")
     for config in configs:
         for indicator_type, spec_key in indicator_specs_needed_for_config(config):
             params = _params_for_indicator_type(config, indicator_type)
@@ -641,7 +653,9 @@ def build_grid_search_task_graph(
                     "params": params,
                 }
                 
-                fingerprint = compute_fingerprint("indicators", payload, [])
+                # Include data fingerprint in dependencies for cache stability across runs
+                deps = [data_fingerprint] if data_fingerprint else []
+                fingerprint = compute_fingerprint("indicators", payload, deps)
                 
                 node = TaskNode(
                     id=task_id,
@@ -653,11 +667,16 @@ def build_grid_search_task_graph(
                 
                 graph.add_task(node)
                 indicator_tasks_by_key[key] = task_id
+    print(f"  [DEBUG] Created {len(indicator_tasks_by_key)} indicator tasks in {time.perf_counter() - t_indicators:.2f}s")
     
     # Per-config: Signals → Simulation → Outputs
     simulation_task_ids = []
     
-    for config in configs:
+    t_signals = time.perf_counter()
+    print(f"  [DEBUG] Building signal tasks ({len(configs)} configs x {len(prep.instruments)} instruments)...")
+    for config_idx, config in enumerate(configs, 1):
+        if config_idx % 5 == 0 or config_idx == len(configs):
+            print(f"  [DEBUG]   Processing config {config_idx}/{len(configs)} ({config.name})...")
         config_pkl = config_staging_dir(workspace_root, config.name) / "config.pkl"
         config_fp = config_fingerprints[config.name]
         
@@ -743,8 +762,12 @@ def build_grid_search_task_graph(
         )
         
         graph.add_task(out_node)
+    print(f"  [DEBUG] Created signal/sim/output tasks for {len(configs)} configs in {time.perf_counter() - t_signals:.2f}s")
     
     # Grid report task (depends on all simulations)
+    t_report = time.perf_counter()
+    print(f"  [DEBUG] Building grid report task...")
+
     result_paths = [str(config_result_path(workspace_root, c.name)) for c in configs]
     report_payload = {
         "result_paths": result_paths,
@@ -762,6 +785,8 @@ def build_grid_search_task_graph(
     )
     
     graph.add_task(report_node)
+    print(f"  [DEBUG] Grid report task created in {time.perf_counter() - t_report:.2f}s")
+    print(f"  [DEBUG] Total DAG build time: {time.perf_counter() - t_start:.2f}s")
     
     return graph
 

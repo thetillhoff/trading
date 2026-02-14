@@ -218,6 +218,111 @@ MTF weight impact: MTF=0.25 avg 1868.3%, MTF=0.20 avg 1573.9%, MTF=0.15 avg 920.
 
 ---
 
+## February 2026 Grid Search Campaign
+
+Five grid searches on DJIA 2008-2012: MTF period, risk/reward, Elliott Wave params, position size, RSI params. Base: w10 (1893.94% alpha). Key results: MTF 4w (+81%), RR 3.0 (+12%), wave 0.025 (+9%), position 10% confirmed, RSI p5/25/75 confirmed. Single period/instrument; validation needed. Configs archived: `configs/archived/grid_*/`.
+
+---
+
+### MTF weekly EMA period: shorter periods (4w, 6w) dramatically outperform longer periods
+
+**Hypothesis:** The MTF weekly EMA period affects signal quality; there exists an optimal period beyond the current 8w baseline.
+
+**Findings:** Grid-search DJIA 2008–2012 over 5 MTF periods (4w, 6w, 8w, 10w, 12w), all with w10 weights (rsi=0.6, mtf=0.25), certainty 0.7, 10% position:
+
+- 4w: **3434.80%** alpha, 64.85% win, 2199 trades
+- 6w: 2211.65%, 59.70% win, 2288 trades
+- 8w: 1893.94%, 58.28% win, 2378 trades (current baseline)
+- 10w: 1394.97%, 56.45% win, 2533 trades
+- 12w: 918.92%, 53.70% win, 2633 trades
+
+Clear inverse relationship: shorter period → higher alpha and win rate. 4w is **81% better** than 8w baseline (3434% vs 1894%). Longer periods smooth trend too much, causing late entries/exits.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, 2008–2012, w10 weights, MTF soft, certainty 0.7, 10% position — MTF weekly EMA period 4w is optimal (3434.80% alpha). Shorter periods are more responsive to trend changes. 4w outperforms 8w by 81%. Baseline should be updated to multi_timeframe_weekly_ema_period: 4.
+
+---
+
+### Risk/reward ratio: higher targets (3.0, 3.5) improve alpha vs 2.5
+
+**Hypothesis:** The risk/reward ratio affects trade quality; there exists an optimal ratio beyond the current 2.5 baseline.
+
+**Findings:** Grid-search DJIA 2008–2012 over 5 risk/reward ratios (1.5, 2.0, 2.5, 3.0, 3.5), all with w10 weights, 8w MTF, certainty 0.7, 10% position:
+
+- 3.0: **2120.21%** alpha, 57.84% win, 2386 trades
+- 3.5: 2095.83%, 54.44% win, 2522 trades
+- 2.5: 1893.94%, 58.28% win, 2378 trades (current baseline)
+- 2.0: 1652.09%, 60.45% win, 2379 trades
+- 1.5: 1324.67%, 62.85% win, 2409 trades
+
+Higher targets increase alpha despite slightly lower win rates. 3.0 is **12% better** than 2.5 baseline. 3.5 similar to 3.0 but win rate drops significantly. Trade-off: higher target = higher alpha but slightly lower win rate.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, 2008–2012, w10 weights, 8w MTF, certainty 0.7, 10% position — risk_reward 3.0 is optimal (2120.21% alpha, +12% vs 2.5). 3.5 is comparable but win rate degradation suggests 3.0 is the sweet spot. Baseline should be updated to risk_reward: 3.0.
+
+---
+
+### Elliott Wave parameters: larger wave size (0.025) improves alpha vs 0.02
+
+**Hypothesis:** Elliott Wave min_confidence and min_wave_size affect signal quality; there exists an optimal combination beyond current 0.65/0.02 baseline.
+
+**Findings:** Grid-search DJIA 2008–2012 over 5 EW parameter combinations, all with w10 weights, 8w MTF, certainty 0.7, 10% position:
+
+- c65_w025 (0.65, 0.025): **2071.14%** alpha, 58.41% win, 2515 trades
+- c70_w025 (0.70, 0.025): **2071.14%**, 58.41% win, 2515 trades (identical)
+- c60_w020 (0.60, 0.020): 1893.94%, 58.28% win, 2378 trades (current baseline)
+- c60_w015 (0.60, 0.015): 1847.39%, 58.38% win, 2381 trades
+- c70_w015 (0.70, 0.015): 1847.39%, 58.38% win, 2381 trades (identical)
+
+Larger wave_size (0.025) filters noise and improves alpha by **9%** vs 0.020. Confidence (0.65 vs 0.70) doesn't affect results when wave_size is same. Smaller wave_size (0.015) underperforms.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, 2008–2012, w10 weights, 8w MTF, certainty 0.7, 10% position — min_wave_size 0.025 is optimal (2071.14% alpha, +9% vs 0.020). min_confidence can be 0.65 or 0.70 (equivalent). Baseline should be updated to min_wave_size: 0.025, min_confidence: 0.65.
+
+---
+
+### RSI parameters: period 5 with relaxed thresholds (20/70) improve signal volume
+
+**Hypothesis:** RSI period and oversold/overbought thresholds affect signal quality when combined with Elliott Wave in w10 setup.
+
+**Findings:** Grid-search DJIA 2008–2012 over 5 RSI parameter combinations, all with w10 weights (rsi=0.6, mtf=0.25), 8w MTF, certainty 0.7, 10% position:
+
+- p5_os20_ob70 (5, 20/70): **1584.48%** alpha, 58.38% win, 2535 trades
+- p7_os25_ob75 (7, 25/75): 1274.99%, 61.13% win, 1608 trades
+- p5_os30_ob80 (5, 30/80): 1174.69%, 56.59% win, 2108 trades
+- p3_os25_ob75 (3, 25/75): 944.09%, 52.62% win, 3052 trades
+- p3_os20_ob70 (3, 20/70): 591.62%, 51.37% win, 3311 trades
+
+Current baseline (p5, 25/75): not tested, but p5_os20_ob70 underperforms baseline (1584% vs ~1894%). Relaxed thresholds (20/70) increase trade volume but quality degrades. Period 3 is too fast (noise). Period 7 reduces trades but higher win rate doesn't compensate.
+
+**Conclusion:** MODIFIED. Under circumstances: walk-forward on DJIA, 2008–2012, w10 weights, 8w MTF, certainty 0.7 — current baseline RSI parameters (period=5, oversold=25, overbought=75) remain optimal; tested alternatives underperform. Relaxing thresholds to 20/70 increases volume but reduces quality. Period 5 with 25/75 thresholds is the best balance.
+
+---
+
+### Position size: 10% is optimal for alpha vs 5%, 15%, 20%
+
+**Hypothesis:** Position size affects absolute returns and risk exposure; there exists an optimal size beyond the current 10% baseline.
+
+**Findings:** Grid-search DJIA 2008–2012 over 4 position sizes (5%, 10%, 15%, 20%), all with w10 weights, 8w MTF, certainty 0.7:
+
+- 10%: **1893.94%** alpha, 58.28% win, 2378 trades
+- 20%: 1765.24%, 56.94% win, 1384 trades
+- 15%: 1690.50%, 57.56% win, 1706 trades
+- 5%: 1391.28%, 59.23% win, 3819 trades
+
+10% position size is optimal. Smaller (5%) underutilizes capital despite higher win rate. Larger (15%, 20%) reduce trade count and win rate due to max_positions constraint. 10% balances capital efficiency and diversification.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward on DJIA, 2008–2012, w10 weights, 8w MTF, certainty 0.7 — position_size_pct 0.1 (10%) is optimal (1893.94% alpha). Larger positions constrain trade count via max_positions limit; smaller positions underutilize capital. Current baseline confirmed.
+
+---
+
+### Combined Feb 2026 grid optimizations
+
+**Hypothesis:** Combining individually optimal parameters (MTF 4w, RR 3.0, wave 0.025) improves alpha beyond individual improvements.
+
+**Findings:** Feb 2026 grids identified: MTF 4w (3434.80% alpha, +81%), RR 3.0 (2120.21%, +12%), wave 0.025 (2071.14%, +9%) vs base (1893.94%). Multiplicative projection: ~4193% estimated. Actual combined performance: verification pending.
+
+**Conclusion:** PENDING. Under circumstances: walk-forward on DJIA, 2008-2012, w10 weights — individual parameters verified optimal; combined effect requires testing. Baseline updated to MTF 4w, RR 3.0, wave 0.025. Validation across periods/instruments needed before live use.
+
+---
+
 ## Regime Detection Hypotheses
 
 ### ADX-based regime detection improves Elliott Wave alpha

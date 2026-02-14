@@ -106,6 +106,69 @@ Reporting (core/grid_test/) → Charts + CSV results
 2. Register it in `get_technical_rules(config)` so it runs when the corresponding config flag is set (e.g. `use_xyz`).
 3. Add config fields to `StrategyConfig` / `SignalConfig` and wire from config loader if needed.
 
+### Multi-Timeframe (MTF) Ensemble
+
+**MTF Ensemble** allows using multiple timeframe periods simultaneously, where each contributes to signal confirmation with its own weight. This enables strategies like "primarily follow 4-week trend (weight 0.25) with secondary validation from 8-week trend (weight 0.05)".
+
+**Configuration:**
+
+MTF configuration is part of `indicator_weights.mtf` as a list of dicts:
+
+```yaml
+signals:
+  use_multi_timeframe: true
+  use_multi_timeframe_filter: false  # false = soft MTF (scoring only), true = hard filter
+  indicator_weights:
+    rsi: 0.6
+    ema: 0.075
+    macd: 0.075
+    mtf:  # MTF ensemble
+      - period: 4   # 4-week EMA
+        weight: 0.25
+      - period: 8   # 8-week EMA
+        weight: 0.05
+```
+
+**Single period (non-ensemble):**
+
+```yaml
+mtf:
+  - period: 4
+    weight: 0.25
+```
+
+**Scoring & Filtering:**
+
+- Each MTF config independently checks if weekly close ≥ weekly EMA (BUY) or ≤ (SELL)
+- **Confirmation score**: Each period contributes `weight × (1 if confirmed else 0)` to the total score
+- **Filter mode** (`use_multi_timeframe_filter: true`): Signal passes if weighted majority confirms (> 50% of total weight)
+- Signal's `mtf_confirms` boolean is set based on weighted majority (used by filter and for analysis)
+
+**Implementation:**
+
+- `core/signals/config.py`: `indicator_weights` accepts `Union[float, List[Dict]]` for mtf value
+- `core/signals/detector.py`: Computes multiple weekly EMAs, ensemble confirmations, and weighted scoring
+- `core/indicators/technical.py`: `confirmation_weighted_score` takes `mtf_ensemble` parameter (list of {weight, confirmed})
+
+**Breaking Change (Feb 2026):**
+
+The `multi_timeframe_weekly_ema_period` field was removed. Existing configs must migrate:
+
+Before:
+```yaml
+multi_timeframe_weekly_ema_period: 4
+indicator_weights:
+  mtf: 0.25
+```
+
+After:
+```yaml
+indicator_weights:
+  mtf:
+    - period: 4
+      weight: 0.25
+```
+
 **Add New Strategy Preset:**
 
 1. Add entry to `PRESET_CONFIGS` dict in `core/signals/config.py`

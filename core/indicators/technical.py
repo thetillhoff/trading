@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union, Dict, Any
+from typing import Optional, Tuple, Union, Dict, Any, List
 
 from ..shared.defaults import (
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
@@ -491,11 +491,11 @@ def confirmation_weighted_score(
     use_macd: bool,
     weights: Optional[Dict[str, float]] = None,
     for_buy: bool = True,
-    mtf_confirms: Optional[bool] = None,
+    mtf_ensemble: Optional[List[Dict[str, Union[float, bool]]]] = None,
 ) -> Optional[float]:
     """
     Weighted confirmation score in [0, 1]. Returns None if weights not provided or no data.
-    When weights has "mtf" and mtf_confirms is not None, MTF is included as a fourth indicator.
+    MTF ensemble support: mtf_ensemble is a list of {weight, confirmed} dicts.
     """
     if not weights:
         return None
@@ -515,10 +515,11 @@ def confirmation_weighted_score(
         if use_macd and flags[2] is not None:
             total_weight += w_macd
             score += w_macd * (1.0 if flags[2] else 0.0)
-    w_mtf = weights.get("mtf")
-    if w_mtf is not None and mtf_confirms is not None:
-        total_weight += w_mtf
-        score += w_mtf * (1.0 if mtf_confirms else 0.0)
+    # MTF ensemble scoring
+    if mtf_ensemble:
+        for mtf_config in mtf_ensemble:
+            total_weight += mtf_config['weight']
+            score += mtf_config['weight'] * (1.0 if mtf_config['confirmed'] else 0.0)
     if total_weight <= 0:
         return None
     return score / total_weight

@@ -1,6 +1,5 @@
 # Trading Strategy Roadmap
 
-
 ## Time ranges / events to analyze
 
 covid_crash: "2019-01-01 - 2021-01-01"
@@ -28,8 +27,6 @@ Completed grid searches: [configs/archived/](configs/archived/).
 - **Push MTF weight higher:** Test mtf weights: 0.30, 0.35, 0.40 with compensating adjustments to rsi/ema/macd. Current best: 
 mtf=0.25, rsi=0.60. Explore if even higher MTF improves further.
 
-- **Higher MTF weight testing:** Since MTF 4w is so powerful, test higher weights: 0.30, 0.35, 0.40 with compensating rsi/ema/macd adjustments. Current: mtf=0.25, rsi=0.60.
-
 - **Risk/reward fine-tuning:** Test intermediate values around 3.0 sweet spot: 2.6, 2.7, 2.8, 2.9, 3.1, 3.2, 3.3, 3.4. Find exact optimal ratio.
 
 - **Max positions analysis:** Current defaults to 1 in PortfolioSimulator. Since MTF 4w increases opportunities (64.85% win rate), test max_positions: 3, 5, 10, unlimited. Monitor exposure (keep < 90%).
@@ -38,13 +35,11 @@ mtf=0.25, rsi=0.60. Explore if even higher MTF improves further.
 
 - **Allow multiple indicator configs in parallel:** For example 0.3 x mtf 4 weeks + 0.1 x mtf 8 weeks. Ensemble approach.
 
-- **improve candidate filtering:** add description of asset/company. Fill gaps or remove those candidates. add some trading data like OHLCV etc, also export to same csv.
+- **Improve candidate filtering:** add description of asset/company. Fill gaps or remove those candidates. add some trading data like OHLCV etc, also export to same csv.
 
 - **Consider pure RSI+MTF strategy:** Since EMA/MACD contribution is minimal (0.075 each), test indicator_weights with only rsi+mtf (e.g., rsi=0.75, mtf=0.25 or rsi=0.70, mtf=0.30). Simplify if possible.
 
 - **Restructure signals configuration:** Use a single configuration for indicators. If an indicator should be used, it has to be configured; if it's missing, it's not used. A minimal configuration contains at least a weight for the indicator and the necessary parameters. Filtering is via weighted score or min_confirmations/min_certainty.
-
-### High Priority – Asset Analysis & Data
 
 - **Asset analysis pt 2:**
   - Backtest scoring: run per-instrument backtest (e.g. baseline single-instrument), rank by return/Sharpe; optional flag (e.g. --backtest-score).
