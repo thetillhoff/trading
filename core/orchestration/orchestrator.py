@@ -96,8 +96,9 @@ def run_task(task_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             instruments=payload["instruments"],
             config=payload.get("config"),
             config_path=Path(payload["config_path"]) if payload.get("config_path") else None,
+            result_path=Path(payload["result_path"]) if payload.get("result_path") else None,
         )
-        return {"result_path": str(out)}
+        return out
     if task_type == "outputs":
         out = tasks.run_outputs_task(
             result_path=Path(payload["result_path"]),
@@ -509,7 +510,9 @@ def build_single_eval_task_graph(
                 "yearly_task_ids": yearly_signal_tasks,
             }
             
-            merge_fingerprint = compute_fingerprint("merge_signals", merge_payload, yearly_signal_tasks)
+            # Merge task fingerprint depends on fingerprints of input signal tasks (not just IDs)
+            yearly_signal_fingerprints = [graph.nodes[tid].fingerprint for tid in yearly_signal_tasks]
+            merge_fingerprint = compute_fingerprint("merge_signals", merge_payload, yearly_signal_fingerprints)
             
             merge_node = TaskNode(
                 id=merge_task_id,
@@ -536,7 +539,9 @@ def build_single_eval_task_graph(
     }
     
     config_fp = compute_config_fingerprint(config_pkl) if config_pkl.exists() else "none"
-    sim_fingerprint = compute_fingerprint("simulation", sim_payload, signal_task_ids + [config_fp])
+    # Simulation fingerprint depends on fingerprints of signal/merge tasks (not just IDs)
+    signal_fingerprints = [graph.nodes[tid].fingerprint for tid in signal_task_ids]
+    sim_fingerprint = compute_fingerprint("simulation", sim_payload, signal_fingerprints + [config_fp])
     
     sim_node = TaskNode(
         id=sim_task_id,
@@ -561,7 +566,8 @@ def build_single_eval_task_graph(
     if config_yaml_path is not None:
         out_payload["config_yaml_path"] = str(config_yaml_path)
     
-    out_fingerprint = compute_fingerprint("outputs", out_payload, [sim_fingerprint])
+    # Outputs should never be cached - they need to write files to output_dir each time
+    out_fingerprint = None
     
     out_node = TaskNode(
         id=out_task_id,
@@ -711,16 +717,27 @@ def build_grid_search_task_graph(
             graph.add_task(node)
             signal_task_ids.append(task_id)
         
-        # Simulation task
+        # Determine output directory (used by both simulation and outputs tasks)
+        rel_path = config_file_map.get(config.name, Path(config.name))
+        if getattr(config, "_source_path", None) is not None:
+            rel_path = config._source_path
+        output_dir = results_root / rel_path
+        
+        # Simulation task - writes result.pkl to permanent location
         sim_task_id = f"sim_{config.name}"
+        permanent_result_path = output_dir / "result.pkl"
+        
         sim_payload = {
             "root": str(workspace_root),
             "config_id": config.name,
             "instruments": prep.instruments,
             "config_path": str(config_pkl),
+            "result_path": str(permanent_result_path),  # Permanent path for caching
         }
         
-        sim_fingerprint = compute_fingerprint("simulation", sim_payload, signal_task_ids + [config_fp])
+        # Simulation fingerprint depends on fingerprints of signal tasks (not just IDs)
+        signal_fingerprints = [graph.nodes[tid].fingerprint for tid in signal_task_ids]
+        sim_fingerprint = compute_fingerprint("simulation", sim_payload, signal_fingerprints + [config_fp])
         
         sim_node = TaskNode(
             id=sim_task_id,
@@ -733,16 +750,10 @@ def build_grid_search_task_graph(
         graph.add_task(sim_node)
         simulation_task_ids.append(sim_task_id)
         
-        # Outputs task
-        rel_path = config_file_map.get(config.name, Path(config.name))
-        if getattr(config, "_source_path", None) is not None:
-            rel_path = config._source_path
-        output_dir = results_root / rel_path
-        result_path = config_result_path(workspace_root, config.name)
-        
+        # Outputs task (uses same permanent_result_path as simulation)
         out_task_id = f"out_{config.name}"
         out_payload = {
-            "result_path": str(result_path),
+            "result_path": str(permanent_result_path),
             "output_dir": str(output_dir),
             "data_root": str(workspace_root),
         }
@@ -751,7 +762,9 @@ def build_grid_search_task_graph(
         if getattr(config, "_yaml_path", None) is not None:
             out_payload["config_yaml_path"] = str(config._yaml_path)
         
-        out_fingerprint = compute_fingerprint("outputs", out_payload, [sim_fingerprint])
+        # Outputs should never be cached - they need to write files to output_dir each time
+        # Even if simulation is cached, we need to regenerate charts/CSVs
+        out_fingerprint = None
         
         out_node = TaskNode(
             id=out_task_id,
@@ -768,13 +781,22 @@ def build_grid_search_task_graph(
     t_report = time.perf_counter()
     print(f"  [DEBUG] Building grid report task...")
 
-    result_paths = [str(config_result_path(workspace_root, c.name)) for c in configs]
+    # Use permanent result paths (same as used by simulation tasks)
+    result_paths = []
+    for config in configs:
+        rel_path = config_file_map.get(config.name, Path(config.name))
+        if getattr(config, "_source_path", None) is not None:
+            rel_path = config._source_path
+        output_dir = results_root / rel_path
+        result_paths.append(str(output_dir / "result.pkl"))
+    
     report_payload = {
         "result_paths": result_paths,
         "summary_dir": str(summary_dir),
     }
     
-    report_fingerprint = compute_fingerprint("grid_report", report_payload, simulation_task_ids)
+    # Grid report should never be cached - it needs to write analysis files each time
+    report_fingerprint = None
     
     report_node = TaskNode(
         id="grid_report",
@@ -799,6 +821,7 @@ def run_tasks(
     cache_enabled: bool = False,
     checkpoint_path: Optional[Path] = None,
     progress_file: Optional[Path] = None,
+    workers_per_level: Optional[Dict[int, int]] = None,
 ) -> Union[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """
     Run tasks in order (legacy mode) or with TaskGraph (new mode).
@@ -811,6 +834,8 @@ def run_tasks(
         cache_enabled: Enable task caching (TaskGraph mode only)
         checkpoint_path: Path for checkpointing (TaskGraph mode only)
         progress_file: JSON file for progress monitoring (TaskGraph mode only)
+        workers_per_level: Optional dict mapping level index to worker count
+                          (e.g., {1: 8, 2: 2} = 8 workers for level 1, 2 for level 2)
         
     Returns:
         Legacy mode: List of result dicts
@@ -829,6 +854,7 @@ def run_tasks(
             verbose=verbose,
             stream=stream,
             progress_file=progress_file,
+            workers_per_level=workers_per_level,
         )
         
         return executor.execute(task_specs, cache=cache, checkpoint_path=checkpoint_path)

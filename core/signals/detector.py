@@ -186,13 +186,6 @@ class SignalDetector:
             mtf_configs = weights.get("mtf") if weights else None
             
             if mtf_configs and isinstance(mtf_configs, list):
-                # #region agent log
-                import sys
-                mem_before = sys.getsizeof(data) if hasattr(sys, 'getsizeof') else -1
-                with open('/app/debug.log', 'a') as f:
-                    import json, time as time_mod
-                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_A","timestamp":int(time_mod.time()*1000),"location":"detector.py:189","message":"MTF ensemble start","data":{"mem_before_mb":mem_before/(1024*1024),"num_mtf_configs":len(mtf_configs),"data_len":len(data),"signal_count":len(signals)},"runId":"debug1","hypothesisId":"A,E"})+'\n')
-                # #endregion
                 # MTF ensemble: compute multiple EMAs
                 weekly = data.resample("W").last()
                 
@@ -202,13 +195,6 @@ class SignalDetector:
                     period = cfg['period']
                     if len(weekly) >= period:
                         weekly_emas[period] = weekly.ewm(span=period, min_periods=period).mean()
-                
-                # #region agent log
-                with open('/app/debug.log', 'a') as f:
-                    import json, time as time_mod, sys
-                    ema_sizes = {p: sys.getsizeof(s) if hasattr(sys, 'getsizeof') else -1 for p, s in weekly_emas.items()}
-                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_B","timestamp":int(time_mod.time()*1000),"location":"detector.py:202","message":"Weekly EMAs computed","data":{"weekly_len":len(weekly),"num_emas":len(weekly_emas),"ema_sizes_kb":{k:v/1024 for k,v in ema_sizes.items()}},"runId":"debug1","hypothesisId":"D"})+'\n')
-                # #endregion
                 
                 # Pre-compute ensemble MTF confirmations for all weekly periods
                 # Note: Keep only confirmation booleans, not full config dicts, to reduce memory
@@ -233,13 +219,6 @@ class SignalDetector:
                     
                     if confirmations:
                         mtf_ensemble_lookup[week_idx] = confirmations
-                
-                # #region agent log
-                with open('/app/debug.log', 'a') as f:
-                    import json, time as time_mod, sys
-                    lookup_size = sys.getsizeof(mtf_ensemble_lookup) if hasattr(sys, 'getsizeof') else -1
-                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_C","timestamp":int(time_mod.time()*1000),"location":"detector.py:232","message":"MTF lookup built","data":{"lookup_entries":len(mtf_ensemble_lookup),"lookup_size_kb":lookup_size/1024,"avg_confirmations_per_week":sum(len(v) for v in mtf_ensemble_lookup.values())/len(mtf_ensemble_lookup) if mtf_ensemble_lookup else 0},"runId":"debug1","hypothesisId":"C"})+'\n')
-                # #endregion
                 
                 # Single pass: set mtf_confirms (weighted majority) and confirmation_score
                 compute_scores = (indicator_df is not None)
@@ -288,14 +267,6 @@ class SignalDetector:
                 if getattr(self.config, "use_multi_timeframe_filter", True):
                     signals = [s for s in signals if s.mtf_confirms]
                 
-                # #region agent log
-                with open('/app/debug.log', 'a') as f:
-                    import json, time as time_mod, sys
-                    mem_after = sys.getsizeof(data) if hasattr(sys, 'getsizeof') else -1
-                    # Check if weekly_emas still exists (not GC'd)
-                    emas_still_exist = 'weekly_emas' in locals()
-                    f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_D","timestamp":int(time_mod.time()*1000),"location":"detector.py:278","message":"MTF ensemble complete","data":{"mem_after_mb":mem_after/(1024*1024),"signals_after_filter":len(signals),"emas_still_in_scope":emas_still_exist,"lookup_still_in_scope":'mtf_ensemble_lookup' in locals()},"runId":"debug1","hypothesisId":"A,D"})+'\n')
-                # #endregion
         _acc("signal_detection_mtf", time.perf_counter() - t0_mtf)
 
         # Filter by signal type, quality, sort and dedupe
@@ -331,18 +302,7 @@ class SignalDetector:
         
         # If mtf_confirms is already set on signals (from detect_signals_with_indicators), use it
         if signals and signals[0].mtf_confirms is not None:
-            # #region agent log
-            with open('/app/debug.log', 'a') as f:
-                import json, time as time_mod
-                f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_E","timestamp":int(time_mod.time()*1000),"location":"detector.py:313","message":"MTF filter: using pre-computed","data":{"signal_count":len(signals)},"runId":"debug1","hypothesisId":"B"})+'\n')
-            # #endregion
             return [s for s in signals if s.mtf_confirms]
-        
-        # #region agent log
-        with open('/app/debug.log', 'a') as f:
-            import json, time as time_mod
-            f.write(json.dumps({"id":f"log_{int(time_mod.time()*1000)}_F","timestamp":int(time_mod.time()*1000),"location":"detector.py:340","message":"MTF filter: fallback computation triggered","data":{"signal_count":len(signals),"weekly_provided":weekly is not None},"runId":"debug1","hypothesisId":"B"})+'\n')
-        # #endregion
         
         # Fallback: compute MTF on the fly for old detect_signals method or direct filter calls
         # Get MTF config

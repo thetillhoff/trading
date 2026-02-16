@@ -35,7 +35,10 @@ def main():
 Examples:
     # Grid search on DJIA (dates come from each config YAML)
     python -m cli.grid_search --instrument djia
-
+    
+    # Use 8 workers for indicators (L1), 2 for simulations (L2)
+    python -m cli.grid_search --workers-l1 8 --workers-l2 2
+    
     # Analyze only (e.g. after hypothesis runs): write analysis_report.md and CSVs into DIR
     python -m cli.grid_search --analyze results/hypothesis_tests_YYYYMMDD_HHMMSS
         """
@@ -55,7 +58,25 @@ Examples:
         "--workers",
         type=int,
         default=None,
-        help="Number of parallel workers (default: auto = CPU count, or 1 if 1 CPU)",
+        help="Number of parallel workers (default: auto = CPU count, or 1 if 1 CPU). Can be overridden per-level with --workers-l1, --workers-l2, etc.",
+    )
+    parser.add_argument(
+        "--workers-l1",
+        type=int,
+        default=None,
+        help="Number of workers for level 1 (typically indicators, benefits from high parallelism)",
+    )
+    parser.add_argument(
+        "--workers-l2",
+        type=int,
+        default=None,
+        help="Number of workers for level 2 (typically simulations, memory-intensive, use 1-2 workers)",
+    )
+    parser.add_argument(
+        "--workers-l3",
+        type=int,
+        default=None,
+        help="Number of workers for level 3 (typically outputs/charts, usually runs serially)",
     )
     parser.add_argument(
         "--output-dir",
@@ -112,20 +133,37 @@ Examples:
     
     configs = []
     config_file_map = {}  # Map config to its source file path for result directory structure
+    
+    # Determine base path for relative paths (use configs/ as root, or config_dir if it's not under configs/)
+    try:
+        configs_root = Path("configs")
+        # Check if config_dir is under configs/
+        config_dir_rel = config_dir.relative_to(configs_root)
+        use_full_path = True  # Use full path from configs/ root
+    except ValueError:
+        # config_dir is not under configs/, use config_dir as base
+        use_full_path = False
+    
     for yaml_file in yaml_files:
         try:
             config = load_config_from_yaml(yaml_file)
             configs.append(config)
-            # Store relative path from configs/ for result directory structure
+            # Store relative path for result directory structure
             try:
-                rel_path = yaml_file.relative_to(config_dir)
-                # Store as: optimization/ew_all_indicators_wave_001 (without .yaml)
+                if use_full_path:
+                    # Get full path from configs/ root
+                    rel_path = yaml_file.relative_to(configs_root)
+                else:
+                    # Get path relative to config_dir
+                    rel_path = yaml_file.relative_to(config_dir)
+                
+                # Store as: grid_mtf/config_name (without .yaml)
                 result_path = rel_path.parent / rel_path.stem
                 config_file_map[config.name] = result_path
                 # Also store in config for reporter access
                 config._source_path = result_path
             except ValueError:
-                # If config_dir is not parent, use config name as fallback
+                # Fallback: use config name
                 config_file_map[config.name] = Path(config.name)
                 config._source_path = Path(config.name)
         except Exception as e:
@@ -172,6 +210,16 @@ Examples:
     workers = args.workers if args.workers is not None else max(
         1, _cpus if _cpus and _cpus > 0 else 1
     )
+    
+    # Build workers_per_level dict from args
+    workers_per_level = {}
+    if args.workers_l1 is not None:
+        workers_per_level[1] = args.workers_l1
+    if args.workers_l2 is not None:
+        workers_per_level[2] = args.workers_l2
+    if args.workers_l3 is not None:
+        workers_per_level[3] = args.workers_l3
+    
     try:
         multiprocessing.set_start_method('spawn', force=True)
     except RuntimeError:
@@ -280,6 +328,8 @@ Examples:
         print(f"  Max parallelism: {max(len(level) for level in levels if level)}")
         
         print(f"\nExecuting grid search with parallel execution and caching...")
+        if workers_per_level:
+            print(f"  Per-level workers: {workers_per_level}")
         run_tasks(
             grid_graph,
             verbose=True,
@@ -287,6 +337,7 @@ Examples:
             cache_enabled=True,
             checkpoint_path=checkpoint_path,
             progress_file=progress_file,
+            workers_per_level=workers_per_level,
         )
         
         # Load results from workspace for baseline update (before workspace is removed)

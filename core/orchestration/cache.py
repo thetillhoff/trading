@@ -201,6 +201,26 @@ class TaskCache:
         self.hits = 0
         self.misses = 0
     
+    def delete(self, fingerprint: str) -> bool:
+        """
+        Delete a specific cached result by fingerprint.
+        
+        Args:
+            fingerprint: Task fingerprint
+            
+        Returns:
+            True if file was deleted, False if it didn't exist
+        """
+        cache_file = self._cache_path(fingerprint)
+        
+        if cache_file.exists():
+            try:
+                cache_file.unlink()
+                return True
+            except Exception:
+                return False
+        return False
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
         total = self.hits + self.misses

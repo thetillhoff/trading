@@ -15,3 +15,17 @@ services:
     # To use all cores, check Docker Desktop > Settings > Resources > CPUs
     # The ProcessPoolExecutor will use up to the number of workers specified (default: 8)
     # No explicit CPU limits here - Docker Desktop settings control this
+  
+  auto-trader:
+    build: .
+    volumes:
+      - .:/app:rw
+      - ./data:/app/data:rw
+      - ./.cache/trading:/root/.cache/trading:rw
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+      - TZ=America/New_York  # Ensure consistent timezone for market hours
+    command: python cli/auto_trade.py
+    restart: unless-stopped  # Auto-restart on crash
+    network_mode: host  # Required for IBKR TWS/Gateway connection on localhost

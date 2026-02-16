@@ -1,4 +1,4 @@
-.PHONY: help clean download evaluate grid-search asset-analysis recommend test test-cov baseline-snapshot-generate
+.PHONY: help clean download evaluate grid-search asset-analysis recommend auto-trade auto-trade-stop auto-trade-logs test test-cov baseline-snapshot-generate
 
 # Default target
 help:
@@ -10,6 +10,9 @@ help:
 	@echo "  make evaluate              Evaluate a strategy (default: baseline.yaml, generates charts)"
 	@echo "  make grid-search           Compare multiple configs from configs/ (auto-parallel, auto-charts)"
 	@echo "  make recommend             Get today's best trade recommendation (baseline config)"
+	@echo "  make auto-trade            Start automated trading service (IBKR paper account)"
+	@echo "  make auto-trade-stop       Stop automated trading service"
+	@echo "  make auto-trade-logs       View automated trading logs"
 	@echo "  make hypothesis-tests      Run multi-period hypothesis suites (category/period selection)"
 	@echo "  make asset-analysis        Run asset analysis (metadata, vol/correlation, candidate ranking; cache-first)"
 	@echo "  make test                  Run tests with pytest"
@@ -27,6 +30,9 @@ help:
 	@echo "  make evaluate ARGS='--config configs/top_performers/ew_rsi.yaml'"
 	@echo "  make recommend                                          # Get today's recommendation"
 	@echo "  make recommend ARGS='--date 2026-01-15'                # Simulate recommendation for specific date"
+	@echo "  make auto-trade                                         # Start automated trading service"
+	@echo "  make auto-trade-logs                                    # View trading service logs"
+	@echo "  make auto-trade-stop                                    # Stop trading service"
 	@echo "  make grid-search                                         # Test all configs in configs/"
 	@echo "  make grid-search ARGS='--config-dir configs/optimization'  # Test specific subdirectory"
 	@echo "  make grid-search ARGS='--output-dir results/my_run ...'    # Direct outputs to a path (e.g. for hypothesis-test flows)"
@@ -77,6 +83,20 @@ asset-analysis:
 
 recommend:
 	$(DOCKER_CLI) cli.recommend $(ARGS)
+
+auto-trade:
+	@echo "Starting automated trading service..."
+	@echo "Note: IBKR TWS or IB Gateway must be running on localhost"
+	docker compose up -d auto-trader
+	@echo "Service started. View logs with: make auto-trade-logs"
+
+auto-trade-stop:
+	@echo "Stopping automated trading service..."
+	docker compose stop auto-trader
+	docker compose rm -f auto-trader
+
+auto-trade-logs:
+	docker compose logs -f auto-trader
 
 # Testing
 test:

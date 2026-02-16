@@ -79,6 +79,7 @@ class Executor:
         verbose: bool = True,
         stream=None,
         progress_file: Optional[Path] = None,
+        workers_per_level: Optional[Dict[int, int]] = None,
     ):
         """
         Initialize executor.
@@ -88,6 +89,8 @@ class Executor:
             verbose: Print progress messages
             stream: Output stream for messages (default: sys.stdout)
             progress_file: Optional JSON file to write progress updates
+            workers_per_level: Optional dict mapping level index to worker count
+                              (e.g., {1: 8, 2: 2} = 8 workers for level 1, 2 for level 2)
         """
         if max_workers is None:
             cpu_count = multiprocessing.cpu_count()
@@ -97,6 +100,7 @@ class Executor:
         self.verbose = verbose
         self.stream = stream or sys.stdout
         self.progress_file = progress_file
+        self.workers_per_level = workers_per_level or {}
         self._task_timings = {}  # Track task execution times
     
     def execute(
@@ -111,7 +115,7 @@ class Executor:
         Args:
             graph: TaskGraph to execute
             cache: Optional TaskCache for fingerprint-based caching
-            checkpoint_path: Optional path to save checkpoints
+            checkpoint_path: Optional path to save checkpoints (also used to load if exists)
             
         Returns:
             Dictionary mapping task_id to result
@@ -121,6 +125,58 @@ class Executor:
         """
         if len(graph) == 0:
             return {}
+        
+        # Try to load checkpoint if it exists
+        if checkpoint_path and checkpoint_path.exists():
+            try:
+                import json
+                with open(checkpoint_path, 'r') as f:
+                    checkpoint_data = json.load(f)
+                
+                # Track old fingerprints for cleanup
+                old_fingerprints_by_task = {}
+                
+                # Only restore completed tasks (not failed ones)
+                checkpoint_graph = TaskGraph.from_json(checkpoint_data)
+                restored_count = 0
+                
+                for task_id, checkpoint_node in checkpoint_graph.nodes.items():
+                    # Track old fingerprint for potential cleanup
+                    if checkpoint_node.fingerprint and task_id in graph.nodes:
+                        old_fp = checkpoint_node.fingerprint
+                        new_fp = graph.nodes[task_id].fingerprint
+                        
+                        # If fingerprint changed, mark old cache entry for deletion
+                        if old_fp != new_fp:
+                            old_fingerprints_by_task[task_id] = old_fp
+                    
+                    if checkpoint_node.status == "completed" and task_id in graph.nodes:
+                        # Restore completed task state
+                        graph.nodes[task_id].status = "completed"
+                        graph.nodes[task_id].result = checkpoint_node.result
+                        restored_count += 1
+                
+                # Clean up invalidated cache entries
+                if cache and old_fingerprints_by_task:
+                    deleted_count = 0
+                    for task_id, old_fp in old_fingerprints_by_task.items():
+                        if cache.delete(old_fp):
+                            deleted_count += 1
+                    
+                    if deleted_count > 0 and self.verbose:
+                        self.stream.write(f"Cleaned up {deleted_count} invalidated cache entries (fingerprint changed)\n")
+                        self.stream.flush()
+                
+                if restored_count > 0 and self.verbose:
+                    self.stream.write(f"\nRestored {restored_count} completed task(s) from checkpoint\n")
+                    failed_count = sum(1 for n in checkpoint_graph.nodes.values() if n.status == "failed")
+                    if failed_count > 0:
+                        self.stream.write(f"Retrying {failed_count} previously failed task(s)\n")
+                    self.stream.flush()
+            except Exception as e:
+                if self.verbose:
+                    self.stream.write(f"Warning: Could not load checkpoint: {e}\n")
+                    self.stream.flush()
         
         # Save graph for DAG visualization BEFORE execution
         # This allows the outputs task to read the current graph
@@ -233,7 +289,15 @@ class Executor:
                 continue
             
             # Execute tasks in parallel
-            level_results = self._execute_level(graph, tasks_to_run, cache)
+            level_workers = self.workers_per_level.get(level_idx, self.max_workers)
+            
+            # Check if this level has memory-intensive tasks
+            task_types = {graph.get_task(tid).task_type for tid in tasks_to_run}
+            if any(tt in ("outputs", "grid_report") for tt in task_types):
+                if level_idx not in self.workers_per_level:
+                    level_workers = 1  # Force serial for these tasks unless overridden
+            
+            level_results = self._execute_level(graph, tasks_to_run, cache, level_workers, level_idx)
             all_results.update(level_results)
             
             # Save graph after each level (for DAG visualization of in-progress execution)
@@ -297,6 +361,8 @@ class Executor:
         graph: TaskGraph,
         task_ids: List[str],
         cache: Optional[Any] = None,
+        level_workers: Optional[int] = None,
+        level_idx: Optional[int] = None,
     ) -> Dict[str, Dict]:
         """Execute all tasks in a single level in parallel."""
         results: Dict[str, Dict] = {}
@@ -304,16 +370,20 @@ class Executor:
         # Calculate max task ID length for alignment
         max_task_id_len = max((len(tid) for tid in task_ids), default=0)
         
-        # Detect memory-intensive task types and force serial execution
-        task_types = {graph.get_task(tid).task_type for tid in task_ids}
-        workers = self.max_workers
+        # Use provided level_workers or fall back to max_workers
+        workers = level_workers if level_workers is not None else self.max_workers
         
-        # Force serial execution for chart generation to prevent OOM
-        if any(tt in ("outputs", "grid_report") for tt in task_types):
-            workers = 1
-            if self.verbose:
-                self.stream.write(f"  Note: Running chart generation serially (1 at a time) to prevent OOM\n")
-                self.stream.flush()
+        # Detect memory-intensive task types
+        task_types = {graph.get_task(tid).task_type for tid in task_ids}
+        forced_serial = any(tt in ("outputs", "grid_report") for tt in task_types)
+        
+        # Log worker configuration
+        if self.verbose and level_idx is not None:
+            if level_idx in self.workers_per_level:
+                self.stream.write(f"Using {workers} worker(s) for this level (configured)\n")
+            elif forced_serial and workers == 1:
+                self.stream.write(f"  Note: Running {', '.join(task_types & {'outputs', 'grid_report'})} serially (1 at a time) to prevent OOM\n")
+            self.stream.flush()
         
         # Submit all tasks to executor
         with ProcessPoolExecutor(max_workers=workers) as executor:

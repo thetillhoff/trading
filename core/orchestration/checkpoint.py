@@ -65,12 +65,13 @@ class Checkpoint:
                 temp_path.unlink()
     
     @classmethod
-    def load(cls, path: Path) -> Checkpoint:
+    def load(cls, path: Path, reset_failed: bool = True) -> Checkpoint:
         """
         Load checkpoint from disk.
         
         Args:
             path: Path to checkpoint file
+            reset_failed: If True, reset failed tasks to pending so they can be retried
             
         Returns:
             Restored Checkpoint
@@ -92,6 +93,18 @@ class Checkpoint:
         
         # Restore graph
         graph = TaskGraph.from_json(data["graph"])
+        
+        # Reset failed tasks to pending for retry
+        if reset_failed:
+            failed_count = 0
+            for node in graph.nodes.values():
+                if node.status == "failed":
+                    node.status = "pending"
+                    node.result = None
+                    failed_count += 1
+            
+            if failed_count > 0:
+                print(f"  Checkpoint: Reset {failed_count} failed task(s) to pending for retry")
         
         # Restore timestamp
         timestamp = datetime.fromisoformat(data["timestamp"])

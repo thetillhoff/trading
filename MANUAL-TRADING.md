@@ -1,5 +1,118 @@
 # Manual Trading Guide
 
+This guide describes two approaches to trading based on this system's signals:
+
+1. **Automated Trading (IBKR Paper Account)** - Recommended starting point
+2. **Manual Trading** - For brokers without API support (ING, Trade Republic)
+
+---
+
+## Automated Trading with IBKR
+
+### Overview
+
+The system can automatically execute trades via Interactive Brokers' API using paper trading accounts. This approach:
+- Runs 24/7 as a background service
+- Analyzes signals daily after market close
+- Places bracket orders automatically
+- Lets IBKR handle exits at stop-loss or target prices
+- Maintains detailed logs and state tracking
+
+### Quick Start
+
+**Prerequisites:**
+1. IBKR paper trading account (free at [interactivebrokers.com](https://www.interactivebrokers.com))
+2. TWS (Trader Workstation) or IB Gateway installed
+3. Docker running locally
+
+**Setup Steps:**
+
+1. **Start TWS/IB Gateway:**
+   - Login with paper trading credentials
+   - File → Global Configuration → API → Settings
+   - Enable "ActiveX and Socket Clients"
+   - Socket port: 7497 (TWS paper) or 4002 (Gateway paper)
+   - Enable "Allow connections from localhost only"
+
+2. **Configure automation:**
+   ```bash
+   # Review/edit configs/ibkr_config.yaml
+   # Default settings use paper account on port 7497
+   ```
+
+3. **Start service:**
+   ```bash
+   make auto-trade        # Start automated trading
+   make auto-trade-logs   # View live logs
+   ```
+
+4. **Monitor:**
+   - Check logs daily: `make auto-trade-logs`
+   - Review orders in TWS/Gateway
+   - Verify state file: `cat data/automation_state.json`
+
+**Service Behavior:**
+- Waits until 4:30 PM ET each trading day
+- Downloads latest market data automatically
+- Analyzes all instruments from `configs/baseline.yaml`
+- Selects best signal (highest certainty)
+- Places bracket order if no existing position for that instrument
+- Skips if already at max positions (3 total)
+- Logs all decisions and actions
+
+**Safety Limits (configurable in `configs/ibkr_config.yaml`):**
+- Max 3 total open positions
+- Max $5,000 per position
+- Min $1,000 account balance required
+- 10% position sizing (of available capital)
+- Paper account only by default
+
+**Stopping the Service:**
+```bash
+make auto-trade-stop   # Graceful shutdown
+```
+
+### Configuration Details
+
+Edit `configs/ibkr_config.yaml`:
+
+```yaml
+broker:
+  ibkr:
+    host: 127.0.0.1
+    port: 7497  # 7497=TWS paper, 4002=Gateway paper, 7496=TWS live, 4001=Gateway live
+    client_id: 1
+    account_type: paper
+
+risk:
+  max_position_size_usd: 5000
+  max_total_positions: 3
+  position_size_pct: 0.1  # 10% per trade
+
+automation:
+  strategy_config: configs/baseline.yaml  # Strategy to use
+  market_close_wait_minutes: 30  # Wait after close for data
+  lookback_days: 365  # History window for signals
+```
+
+### Transitioning to Live Trading (Future)
+
+**DO NOT attempt live trading until:**
+1. Paper trading runs successfully for 2-4 weeks
+2. Results match backtest expectations (±20%)
+3. You've monitored and verified all order placements
+4. You understand all risk parameters
+
+**When ready:**
+1. Change `port: 7496` (or 4001 for Gateway) in config
+2. Start with very small position sizes ($100-500)
+3. Monitor closely for first month
+4. Gradually increase to normal limits
+
+---
+
+## Manual Trading (ING, Trade Republic, Other Brokers)
+
 A step-by-step schedule for manual trading using the daily recommendation system with Interactive Brokers.
 
 ## Overview

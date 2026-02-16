@@ -336,7 +336,7 @@ def run_signals_task(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wb") as f:
         pickle.dump(all_signals, f)
-    return out_path
+    return {"signal_path": str(out_path)}
 
 
 def run_merge_signals_task(
@@ -378,7 +378,7 @@ def run_merge_signals_task(
     with open(out_path, "wb") as f:
         pickle.dump(all_signals, f)
     
-    return out_path
+    return {"merged_signal_path": str(out_path)}
 
 
 def run_simulation_task(
@@ -387,13 +387,18 @@ def run_simulation_task(
     instruments: List[str],
     config: Any = None,
     config_path: Path = None,
+    result_path: Path = None,
 ) -> Path:
     """
     Simulation task: merge signals from disk, run portfolio sim, write WalkForwardResult.
 
     Reads: prep manifest, signals from root/configs/<config_id>/signals/<instrument>.pkl
     for each instrument, price data from root/data/<instrument>.parquet.
-    Writes: WalkForwardResult to root/configs/<config_id>/result.pkl. Returns that path.
+    Writes: WalkForwardResult to root/configs/<config_id>/result.pkl (or result_path if provided).
+    Returns that path.
+    
+    Args:
+        result_path: Optional custom path for result.pkl (for grid searches with permanent paths)
     """
     from .contract import config_result_path, config_signals_path
     from ..evaluation.walk_forward import _portfolio_simulator_from_config
@@ -474,11 +479,18 @@ def run_simulation_task(
         performance_timings=None,
         instruments_used=list(prices_by_instrument.keys()),
     )
-    out_path = config_result_path(root, config_id)
+    
+    # Use custom result_path if provided (for grid searches with permanent paths)
+    # Otherwise use default temp workspace path
+    if result_path is not None:
+        out_path = Path(result_path)
+    else:
+        out_path = config_result_path(root, config_id)
+    
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wb") as f:
         pickle.dump(result, f)
-    return out_path
+    return {"result_path": str(out_path)}
 
 
 def run_outputs_task(
@@ -631,7 +643,7 @@ def run_outputs_task(
         price_data_by_instrument.clear()
     gc.collect()
     
-    return output_dir
+    return {"output_dir": str(output_dir)}
 
 
 def run_grid_report_task(
@@ -670,4 +682,4 @@ def run_grid_report_task(
     reporter.save_parameter_sensitivity_csv(results, filename_prefix="parameter_sensitivity")
     reporter.generate_analysis_report(results, filename="analysis_report.md")
     analyze_results_dir(summary_dir, output_dir=summary_dir, verbose=False)
-    return summary_dir
+    return {"summary_dir": str(summary_dir)}

@@ -43,4 +43,7 @@ package-lock.json
 # Project-local cache
 .cache/
 
+# Debug logs
+debug.log
+
 results/

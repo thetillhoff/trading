@@ -127,6 +127,24 @@ Grid searches and evaluations use content-addressable caching at `~/.cache/tradi
 - First run: ~22 minutes
 - Subsequent identical runs: <1 second (1463x speedup)
 
+**Worker Configuration for Large Grids:**
+
+Different execution levels have different memory requirements:
+- **Level 1 (indicators)**: Lightweight, benefits from high parallelism (8+ workers)
+- **Level 2 (simulations)**: Memory-intensive, use fewer workers (1-2) to prevent OOM
+- **Level 3 (charts/outputs)**: Automatically runs serially (1 worker) to prevent OOM
+
+```bash
+# Use 8 workers for indicators, 2 for simulations
+make grid-search ARGS='--workers-l1 8 --workers-l2 2'
+
+# Or specify all levels explicitly
+make grid-search ARGS='--workers-l1 8 --workers-l2 1 --workers-l3 1'
+
+# Old style (all levels use same worker count, may cause OOM on L2)
+make grid-search ARGS='--workers 8'
+```
+
 **Cache cleanup** (if needed):
 
 ```bash
@@ -145,6 +163,68 @@ rm -rf ~/.cache/trading/
 - Workspace paths are excluded from fingerprints, enabling cache reuse across grid searches
 - Cache is automatically checked before each task executes
 - Cached results are loaded instantly instead of recomputing
+
+## Documentation
+
+- **[MANUAL-TRADING.md](MANUAL-TRADING.md)**: Complete guide for both automated (IBKR) and manual trading
+- **[DEVELOPMENT.md](DEVELOPMENT.md)**: Development history and design decisions
+- **[ROADMAP.md](ROADMAP.md)**: Planned improvements and future features
+- **Code Documentation**: All functionality is documented in the unified `core/` modules
+  - See docstrings and comments in `core/data/`, `core/indicators/`, `core/signals/`, `core/evaluation/`, `core/grid_test/`, `core/broker/`, `core/automation/`
+
+## Trading Modes
+
+### 1. Automated Trading (IBKR Paper Account)
+
+**Quick Start:**
+```bash
+# Prerequisites: IBKR paper account + TWS/Gateway running
+make auto-trade        # Start automated service
+make auto-trade-logs   # Monitor live
+make auto-trade-stop   # Stop service
+```
+
+**How it works:**
+- Long-running service monitors market hours
+- Downloads data after 4:30 PM ET daily
+- Analyzes signals from baseline strategy
+- Places bracket orders automatically via IBKR API
+- IBKR handles exits at stop-loss/target
+
+**Safety features:**
+- Paper trading by default
+- Max 3 positions, $5k per position
+- State tracking prevents duplicates
+- Detailed logging to `data/automation.log`
+
+See [MANUAL-TRADING.md](MANUAL-TRADING.md) for full setup and configuration.
+
+### 2. Manual Trading Recommendations
+
+**Get daily recommendations:**
+```bash
+make recommend                        # Today's best opportunity
+make recommend ARGS='--date 2026-01-15'  # Historical date
+```
+
+Output includes:
+- Instrument ticker
+- Entry price, stop-loss, target
+- Signal confidence (0-1)
+- Risk/reward ratio
+
+Use with manual brokers (ING, Trade Republic) following the workflows in [MANUAL-TRADING.md](MANUAL-TRADING.md).
+
+### 3. Backtesting & Research
+
+**Evaluate strategies:**
+```bash
+make evaluate                         # Test baseline.yaml
+make grid-search                      # Compare multiple configs
+make hypothesis-tests                 # Multi-period analysis
+```
+
+Results in `results/` with charts and CSV reports.
 
 ## Documentation
 
