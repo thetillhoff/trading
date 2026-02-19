@@ -323,6 +323,30 @@ Current baseline (p5, 25/75): not tested, but p5_os20_ob70 underperforms baselin
 
 ---
 
+### MTF single-period grid vs dual-period grid (grid_mtf_ensemble_single vs grid_mtf_ensemble_dual)
+
+**Hypothesis:** Dual MTF (two weekly periods with separate weights, e.g. 4w + 8w) beats or matches single MTF (one period, one weight) in alpha on the same evaluation.
+
+**Findings:** Same period 2008–2012, same eval params. **Single grid (18 configs):** best mtf_ens_2w_035 — **22,848%** alpha, 77.7% win rate, 1,991 trades. Top 5: 2w_035, 2w_025 (13,652%), 4w_035 (8,031%), 4w_025 (4,645%), 6w_035 (2,863%). Short periods (2w, 4w) and higher weights (0.25–0.35) dominate; 12w and weight 0.15 are worst (214–721% alpha). **Dual grid (9 configs):** best mtf_dual_4w020_8w010_rsi040 — **7,082%** alpha, 66.16% win rate, 2,376 trades. Top 5: 4w020_8w010_rsi040, 4w020_8w010_rsi050 (4,250%), 4w015_8w015_rsi050 (3,843%), 4w015_8w015_rsi040 (3,611%), 4w020_8w010_rsi060 (2,993%). Mean alpha: single 3,781%, dual 3,706% (nearly equal). Single has much higher variance (best 22,848%, worst 214%); dual has a higher floor (worst 2,799%).
+
+**Conclusion:** REJECTED. Under circumstances: walk-forward 2008–2012, MTF soft, same baseline (EW+RSI+EMA+MACD, certainty 0.7, 10% position, risk_reward 3.0) — **single MTF with one short period and high weight (2w, 0.35) strongly outperforms the best dual MTF** (22,848% vs 7,082%). Dual is more consistent (narrower range) but does not beat the best single. Optimal single config for this period: period=2w, weight=0.35. Baseline is currently dual (4w=0.2, 8w=0.1, rsi=0.4); consider updating to single 2w_035 for this evaluation setup if maximizing alpha is the goal.
+
+---
+
+### MTF 2w included in dual/triple (grid_mtf_2w_4w_8w)
+
+**Hypothesis:** Adding 2w to dual or triple MTF (2w+4w, 2w+8w, or 2w+4w+8w) on baseline (rsi=0.4) improves alpha over the current baseline (4w=0.2, 8w=0.1 only).
+
+**Findings:** Grid 2008–2012, 6 configs (dual 2w4w, 2w8w; triple 2w4w8w). Best: **mtf_2w4w_020_010** (2w=0.2, 4w=0.1) — **17,362.7%** alpha, 69.61% win rate, 2,409 trades. Second: mtf_2w8w_020_010 (2w=0.2, 8w=0.1) — 16,212.5% alpha, 68.49% win. Triples: mtf_2w4w8w_015_010_005 10,795%; mtf_2w4w8w_010_010_010 7,904%. Worst: mtf_2w8w_015_015 (2w=0.15, 8w=0.15) 5,366%. **Did 2w4w beat 4w8w?** Yes. Best 4w8w (grid_mtf_ensemble_dual, rsi=0.4): mtf_dual_4w020_8w010_rsi040 **7,082.7%** alpha. 2w4w (17,363%) is ~2.45× 4w8w (7,083%).
+
+**2w vs 4w vs 8w overall** (single-period from grid_mtf_ensemble_single rsi=0.6; dual/triple from grid_mtf_2w_4w_8w and grid_mtf_ensemble_dual, rsi=0.4): **2w dominates** — single 2w_035 22,849%, 2w_025 13,652%; dual 2w4w 17,363%, 2w8w 16,213%. **4w next** — single 4w_035 8,031%, 4w_025 4,645%; dual 4w8w best 7,083%. **8w weakest** — single 8w_035 2,399%, 8w_025 2,296%, 8w_015 398%; when 8w shares weight equally (2w8w_015_015) 5,366%. Hierarchy: 2w > 4w > 8w for alpha in this evaluation.
+
+**Top 3 across last two grid searches** (grid_mtf_2w_4w_8w + grid_mtf_ensemble_single): (1) **mtf_ens_2w_035** 22,849% alpha; (2) **mtf_2w4w_020_010** 17,363%; (3) **mtf_ens_2w_025** 13,652%. Note: single grid used rsi=0.6, 2w4w grid used rsi=0.4.
+
+**Conclusion:** VERIFIED. Under circumstances: walk-forward 2008–2012, baseline rsi=0.4 — **dual 2w=0.2, 4w=0.1 is optimal** among 2w/4w/8w combinations (17,362% alpha). 2w4w beats 4w8w. Baseline updated to mtf: [{ period: 2, weight: 0.2 }, { period: 4, weight: 0.1 }].
+
+---
+
 ## Regime Detection Hypotheses
 
 ### ADX-based regime detection improves Elliott Wave alpha

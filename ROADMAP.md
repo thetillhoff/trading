@@ -20,6 +20,9 @@ Completed grid searches: [configs/archived/](configs/archived/).
 
 ### High Priority
 
+- **Full new review:** Review all the code and the documentation, and make sure everything is up to date and correct. Keep things terse and to the point. Add new suggestions based on your findings to the roadmap. Clean up / improve the HYPOTHESIS_TEST_RESULTS.md file, too. (no immediate simulation result references, only X is better than Y because of Z)
+
+- **IBKR API Integration:**
 Week 1: IBKR API Integration
 Install ib_insync library (Python wrapper for IBKR API)
 Create cli/auto_trade.py - automated trade executor
