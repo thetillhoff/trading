@@ -1,5 +1,5 @@
 name: baseline-long
-description: Baseline for long period (2008-2024). Updated Feb 2026 with dual MTF grid search.
+description: Baseline for long period (2008-2024). Updated Feb 2026 with MTF 2w/4w/8w grid (2w=0.2, 4w=0.1).
 
 indicators:
   elliott_wave:
@@ -31,14 +31,14 @@ signals:
   use_trend_filter: false # gate entries by trend (rejected in tests)
   use_multi_timeframe: true # confirm daily signals with weekly trend; MTF as soft indicator
   use_multi_timeframe_filter: false # MTF contributes to confirmation score (not hard filter)
-  indicator_weights: # weights for dual MTF (4w=0.2, 8w=0.1, rsi=0.4): 7,082% alpha, 66% win rate
+  indicator_weights: # 2w=0.2, 4w=0.1 (grid_mtf_2w_4w_8w best): 17,363% alpha, 69.6% win rate
     rsi: 0.4
     ema: 0.075
     macd: 0.075
     mtf:
-      - period: 4
+      - period: 2
         weight: 0.2
-      - period: 8
+      - period: 4
         weight: 0.1
 
 regime:

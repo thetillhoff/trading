@@ -1,0 +1,29 @@
+name: ibkr-paper-trading
+description: Configuration for IBKR paper trading automation
+
+broker:
+  ibkr:
+    host: 127.0.0.1
+    port: 7497  # Paper trading port (7496 = live TWS, 4002 = paper Gateway, 4001 = live Gateway)
+    client_id: 1
+    account_type: paper  # 'paper' or 'live' (for future use)
+    connection_timeout: 10  # seconds
+
+risk:
+  max_position_size_usd: 5000  # Hard cap per position
+  max_total_positions: 3       # Total open positions across all instruments
+  min_position_size_usd: 20    # Skip trades smaller than this (matches baseline.yaml)
+  min_account_balance: 1000    # Don't trade if balance below this
+  position_size_pct: 0.1       # 10% of available capital per position (matches baseline.yaml)
+
+automation:
+  enabled: true
+  strategy_config: configs/baseline.yaml  # Strategy config to use for signal detection
+  market_close_hour: 16        # 4 PM ET
+  market_close_minute: 0
+  market_close_wait_minutes: 30  # Wait after 4 PM ET before processing
+  data_staleness_max_days: 3     # Skip if data older than this
+  lookback_days: 365             # Days of historical data for signal detection
+  log_path: data/automation.log
+  state_path: data/automation_state.json
+  cleanup_state_days: 30         # Keep state records for this many days
